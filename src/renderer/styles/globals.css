@@ -1,0 +1,253 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Custom scrollbar - Minimalist */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-zinc-200 rounded-full;
+    transition: background-color 0.2s;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-zinc-300;
+  }
+
+  /* Selection */
+  ::selection {
+    @apply bg-zinc-900 text-white;
+  }
+}
+
+@layer components {
+  /* Panel styles - Cleaner, flatter */
+  .panel {
+    @apply bg-white border border-border rounded-lg shadow-sm;
+  }
+
+  .panel-header {
+    @apply px-4 py-3 border-b border-border flex items-center justify-between bg-zinc-50/50;
+  }
+
+  .panel-body {
+    @apply p-4;
+  }
+
+  /* Button variants - Techy */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md font-medium text-sm transition-all duration-200;
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-zinc-900;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-primary-foreground hover:bg-primary-hover shadow-sm;
+  }
+
+  .btn-secondary {
+    @apply btn bg-white border border-input text-foreground hover:bg-zinc-50 shadow-sm;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-muted-foreground hover:bg-zinc-100 hover:text-foreground;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-500 text-white hover:bg-red-600 shadow-sm;
+    @apply focus:ring-red-500;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+
+  .btn-md {
+    @apply px-4 py-2;
+  }
+
+  .btn-lg {
+    @apply px-6 py-3 text-base;
+  }
+
+  /* Recording button */
+  .btn-record {
+    @apply btn bg-red-500 text-white hover:bg-red-600 rounded-full shadow-md;
+    @apply focus:ring-red-500;
+  }
+
+  .btn-record.recording {
+    @apply animate-pulse-subtle ring-4 ring-red-100;
+  }
+
+  /* Input styles */
+  .input {
+    @apply w-full px-3 py-2 bg-white border border-input rounded-md;
+    @apply text-sm text-foreground placeholder-muted-foreground;
+    @apply focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent;
+    @apply transition-all duration-200;
+  }
+
+  /* Rich text editor */
+  .prose-editor {
+    @apply prose prose-sm prose-zinc max-w-none;
+    @apply prose-headings:font-semibold prose-headings:tracking-tight;
+    @apply prose-p:leading-relaxed;
+    @apply prose-strong:font-semibold;
+    @apply prose-ul:list-disc prose-ol:list-decimal;
+  }
+
+  .prose-editor .ProseMirror {
+    @apply outline-none min-h-[200px];
+  }
+
+  .prose-editor .ProseMirror p.is-editor-empty:first-child::before {
+    @apply text-muted-foreground float-left h-0 pointer-events-none;
+    content: attr(data-placeholder);
+  }
+
+  /* Slide thumbnail */
+  .slide-thumb {
+    @apply relative rounded-md overflow-hidden border border-transparent cursor-pointer;
+    @apply transition-all duration-200;
+    @apply hover:border-zinc-300;
+  }
+
+  .slide-thumb.active {
+    @apply border-zinc-900 ring-1 ring-zinc-900;
+  }
+
+  .slide-thumb img {
+    @apply w-full h-auto object-cover;
+  }
+
+  /* Transcript segment */
+  .transcript-segment {
+    @apply py-2 px-3 rounded-md transition-colors duration-200;
+    @apply hover:bg-zinc-50;
+  }
+
+  .transcript-segment.active {
+    @apply bg-zinc-50 border-l-2 border-zinc-900;
+  }
+
+  /* AI chat message */
+  .chat-message {
+    @apply p-3 rounded-lg max-w-[85%] text-sm;
+  }
+
+  .chat-message.user {
+    @apply bg-zinc-100 text-foreground ml-auto;
+  }
+
+  .chat-message.assistant {
+    @apply bg-white border border-border text-foreground shadow-sm;
+  }
+
+  /* Keyboard shortcut badge */
+  .kbd {
+    @apply inline-flex items-center justify-center px-1.5 py-0.5;
+    @apply bg-zinc-100 text-muted-foreground text-[10px] font-mono font-medium rounded;
+    @apply border border-zinc-200;
+  }
+
+  /* Drag handle */
+  .drag-handle {
+    @apply w-1 bg-zinc-200 rounded-full cursor-col-resize;
+    @apply hover:bg-zinc-300 active:bg-zinc-400;
+    @apply transition-colors duration-200;
+  }
+
+  /* Tooltip */
+  .tooltip {
+    @apply absolute z-50 px-2 py-1 text-xs font-medium;
+    @apply bg-zinc-900 text-white rounded shadow-lg;
+    @apply animate-fade-in;
+  }
+
+  /* Modal overlay */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/20 backdrop-blur-sm;
+    @apply flex items-center justify-center z-50;
+    @apply animate-fade-in;
+  }
+
+  .modal-content {
+    @apply bg-white rounded-xl shadow-xl border border-border max-w-lg w-full mx-4;
+    @apply animate-slide-up;
+  }
+
+  /* Waveform visualization */
+  .waveform {
+    @apply h-12 bg-zinc-50 rounded-lg overflow-hidden border border-border;
+  }
+
+  .waveform-bar {
+    @apply bg-zinc-900 transition-all duration-100;
+  }
+}
+
+@layer utilities {
+  /* Traffic light padding for macOS */
+  .traffic-light-padding {
+    padding-left: 80px;
+  }
+
+  /* Draggable region */
+  .draggable {
+    -webkit-app-region: drag;
+  }
+
+  .non-draggable {
+    -webkit-app-region: no-drag;
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Glass effect - cleaner */
+  .glass {
+    @apply bg-white/80 backdrop-blur-md border-b border-border;
+  }
+
+  /* Animation for toast slide in */
+  .animate-slide-in-right {
+    animation: slideInRight 0.2s ease-out;
+  }
+
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(1rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+}
