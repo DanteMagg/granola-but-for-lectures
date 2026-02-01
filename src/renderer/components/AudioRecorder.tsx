@@ -4,6 +4,7 @@ import { Mic, MicOff, Pause, Play, Square, AlertTriangle, Loader2 } from 'lucide
 import { clsx } from 'clsx'
 import { AUDIO_CONFIG, TRANSCRIPTION_CONFIG } from '@shared/constants'
 import { RECORDING_TOGGLE_EVENT } from '../App'
+import { useAccessibility } from '../hooks/useAccessibility'
 
 interface WhisperStatus {
   loaded: boolean
@@ -12,7 +13,8 @@ interface WhisperStatus {
 }
 
 export function AudioRecorder() {
-  const { session, setRecording, setRecordingStartTime, addTranscriptSegment } = useSessionStore()
+  const { session, setRecording, setRecordingStartTime, addTranscriptSegment, addRecordingDuration, setUIState } = useSessionStore()
+  const { autoDeleteAudio } = useAccessibility()
   const [isPaused, setIsPaused] = useState(false)
   const [duration, setDuration] = useState(0)
   const [audioLevel, setAudioLevel] = useState(0)
@@ -35,11 +37,16 @@ export function AudioRecorder() {
   
   // Ref to track if we should toggle (to avoid stale closure issues)
   const isRecordingRef = useRef(false)
+  const autoDeleteAudioRef = useRef(autoDeleteAudio)
 
-  // Keep ref in sync with session state
+  // Keep refs in sync with state
   useEffect(() => {
     isRecordingRef.current = session?.isRecording ?? false
   }, [session?.isRecording])
+
+  useEffect(() => {
+    autoDeleteAudioRef.current = autoDeleteAudio
+  }, [autoDeleteAudio])
 
   // Check Whisper status on mount
   useEffect(() => {
@@ -222,13 +229,15 @@ export function AudioRecorder() {
       mediaRecorderRef.current.onstop = async () => {
         // Save full audio file
         const audioBlob = new Blob(chunksRef.current, { type: AUDIO_CONFIG.MIME_TYPE })
+        const currentSlideIndex = session?.currentSlideIndex ?? 0
+        const currentSessionId = session?.id
         
-        if (session) {
+        if (currentSessionId) {
           const base64 = await blobToBase64(audioBlob)
           await window.electronAPI.saveAudio(
-            session.id, 
+            currentSessionId, 
             base64, 
-            session.currentSlideIndex
+            currentSlideIndex
           )
         }
 
@@ -237,6 +246,16 @@ export function AudioRecorder() {
           const remainingBlob = new Blob(transcriptionChunksRef.current, { type: AUDIO_CONFIG.MIME_TYPE })
           transcriptionChunksRef.current = []
           await transcribeChunks(remainingBlob)
+        }
+
+        // Auto-delete audio after transcription if setting is enabled
+        if (autoDeleteAudioRef.current && currentSessionId) {
+          try {
+            await window.electronAPI.deleteAudio(currentSessionId, currentSlideIndex)
+            console.log('Audio file auto-deleted after transcription')
+          } catch (err) {
+            console.error('Failed to auto-delete audio:', err)
+          }
         }
 
         // Stop all tracks
@@ -280,6 +299,9 @@ export function AudioRecorder() {
   }
 
   const stopRecording = () => {
+    // Calculate recording duration before stopping
+    const recordedDuration = duration
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
     }
@@ -304,6 +326,19 @@ export function AudioRecorder() {
     setRecordingStartTime(null)
     setIsPaused(false)
     setAudioLevel(0)
+
+    // Track recording duration
+    if (recordedDuration > 0) {
+      addRecordingDuration(recordedDuration)
+    }
+
+    // Show feedback modal if recording was substantial (> 30 seconds)
+    // and user hasn't already given feedback for this session
+    if (recordedDuration > 30000 && session && !session.feedback) {
+      setTimeout(() => {
+        setUIState({ showFeedbackModal: true })
+      }, 500) // Small delay for smoother UX
+    }
   }
 
   const togglePause = () => {

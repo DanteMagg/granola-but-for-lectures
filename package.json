@@ -75,6 +75,17 @@
       "dist/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/whisper-node/**/*",
+      "node_modules/node-llama-cpp/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "models",
+        "to": "models",
+        "filter": ["**/*"]
+      }
+    ],
     "mac": {
       "category": "public.app-category.education",
       "target": "dmg"
@@ -84,6 +95,7 @@
     },
     "linux": {
       "target": "AppImage"
-    }
+    },
+    "nativeRebuilder": "legacy"
   }
 }

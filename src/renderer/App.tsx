@@ -13,6 +13,9 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { ExportModal } from './components/ExportModal'
 import { SettingsModal } from './components/SettingsModal'
 import { ShortcutsHelpModal } from './components/ShortcutsHelpModal'
+import { OnboardingModal, useOnboarding } from './components/OnboardingModal'
+import { SearchModal } from './components/SearchModal'
+import { SessionFeedbackModal } from './components/SessionFeedbackModal'
 import { ToastContainer, toast } from './components/Toast'
 import { usePdfImport } from './hooks/usePdfImport'
 import { SHORTCUTS } from '@shared/constants'
@@ -30,10 +33,12 @@ export default function App() {
     refreshSessionList,
     saveSession,
     isSaving,
+    setFeedback,
   } = useSessionStore()
   
   const [isReady, setIsReady] = useState(false)
   const { importPdf, isImporting } = usePdfImport()
+  const { showOnboarding, completeOnboarding } = useOnboarding()
 
   // Initialize app
   useEffect(() => {
@@ -68,6 +73,10 @@ export default function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Handle Escape key globally (close modals)
       if (e.key === 'Escape') {
+        if (ui.showSearchModal) {
+          setUIState({ showSearchModal: false })
+          return
+        }
         if (ui.showAIChat) {
           setUIState({ showAIChat: false })
           return
@@ -121,6 +130,15 @@ export default function App() {
         if (!isImporting) {
           importPdf()
           toast.shortcut('Import PDF', '⌘O')
+        }
+        return
+      }
+
+      // Meta+K or Meta+F - Search
+      if (isMod && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'f')) {
+        e.preventDefault()
+        if (session) {
+          setUIState({ showSearchModal: true })
         }
         return
       }
@@ -194,6 +212,14 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div className="h-screen flex flex-col bg-background overflow-hidden font-sans">
+        {/* Skip links for accessibility */}
+        <a 
+          href="#main-content" 
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:bg-white focus:px-4 focus:py-2 focus:rounded-md focus:shadow-lg focus:text-foreground focus:font-medium"
+        >
+          Skip to main content
+        </a>
+
         {/* Header with traffic light padding */}
         <Header />
 
@@ -201,8 +227,8 @@ export default function App() {
           {/* Sidebar */}
           <Sidebar />
 
-          {/* Main content */}
-          <main className="flex-1 flex flex-col overflow-hidden" role="main">
+              {/* Main content */}
+              <main id="main-content" className="flex-1 flex flex-col overflow-hidden" role="main" aria-label="Lecture notes workspace">
             <ErrorBoundary>
               {session && session.slides.length > 0 ? (
                 <>
@@ -249,8 +275,41 @@ export default function App() {
         {/* Shortcuts Help Modal */}
         {ui.showShortcutsHelp && <ShortcutsHelpModal />}
 
+        {/* Search Modal */}
+        {ui.showSearchModal && (
+          <SearchModal onClose={() => setUIState({ showSearchModal: false })} />
+        )}
+
+        {/* Session Feedback Modal */}
+        {ui.showFeedbackModal && session && (
+          <SessionFeedbackModal
+            stats={{
+              slidesReviewed: new Set(
+                Object.keys(session.notes).concat(
+                  Object.keys(session.transcripts)
+                )
+              ).size,
+              totalSlides: session.slides.length,
+              notesWritten: Object.values(session.notes).filter(n => n.plainText.trim().length > 0).length,
+              transcriptSegments: Object.values(session.transcripts).flat().length,
+              recordingDuration: session.totalRecordingDuration || 0,
+            }}
+            onSubmit={(rating, feedback) => {
+              setFeedback(rating, feedback)
+              setUIState({ showFeedbackModal: false })
+              toast.success('Thanks!', 'Your feedback has been saved.')
+            }}
+            onSkip={() => setUIState({ showFeedbackModal: false })}
+          />
+        )}
+
         {/* Toast notifications */}
         <ToastContainer />
+
+        {/* Onboarding modal for first-time users */}
+        {showOnboarding && (
+          <OnboardingModal onComplete={completeOnboarding} />
+        )}
       </div>
     </ErrorBoundary>
   )

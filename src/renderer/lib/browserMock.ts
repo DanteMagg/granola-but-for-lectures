@@ -118,6 +118,12 @@ export const browserMockAPI: ElectronAPI = {
     return `audio-slide-${slideIndex}.webm`
   },
 
+  deleteAudio: async (_sessionId: string, _slideIndex: number) => {
+    // In browser, no-op
+    console.log('[Mock] Delete audio')
+    return true
+  },
+
   getPaths: async () => {
     return {
       userData: '/browser-mock/userData',
@@ -284,6 +290,32 @@ export const browserMockAPI: ElectronAPI = {
   onLLMChunk: (_callback) => {
     // Mock: no-op, return unsubscribe function
     return () => {}
+  },
+
+  // ==========================================
+  // Logging operations (browser mock)
+  // ==========================================
+  
+  logsGet: async () => {
+    return '[Browser Mock] Logs not available in browser mode'
+  },
+
+  logsGetAll: async () => {
+    return '[Browser Mock] Logs not available in browser mode'
+  },
+
+  logsClear: async () => {
+    console.log('[Mock] Clear logs')
+    return true
+  },
+
+  logsGetPath: async () => {
+    return '/mock/path/logs'
+  },
+
+  logsWrite: async (level: string, message: string, data?: unknown) => {
+    console.log(`[Mock Log ${level}] ${message}`, data)
+    return true
   },
 }
 

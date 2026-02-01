@@ -206,6 +206,123 @@
 }
 
 @layer utilities {
+  /* Screen reader only - for accessibility */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .focus\:not-sr-only:focus {
+    position: static;
+    width: auto;
+    height: auto;
+    padding: revert;
+    margin: revert;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+
+  /* High contrast mode for accessibility */
+  .high-contrast {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 0%;
+    --primary-hover: 0 0% 90%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 70%;
+    --border: 0 0% 40%;
+    --input: 0 0% 40%;
+  }
+
+  .high-contrast body {
+    background-color: black !important;
+    color: white !important;
+  }
+
+  .high-contrast .panel,
+  .high-contrast .modal-content {
+    background-color: black !important;
+    border-color: white !important;
+  }
+
+  .high-contrast .btn-primary {
+    background-color: white !important;
+    color: black !important;
+    border: 2px solid white !important;
+  }
+
+  .high-contrast .btn-secondary,
+  .high-contrast .btn-ghost {
+    background-color: black !important;
+    color: white !important;
+    border: 2px solid white !important;
+  }
+
+  .high-contrast .input {
+    background-color: black !important;
+    color: white !important;
+    border: 2px solid white !important;
+  }
+
+  .high-contrast .input::placeholder {
+    color: #888 !important;
+  }
+
+  .high-contrast .kbd {
+    background-color: black !important;
+    color: white !important;
+    border: 1px solid white !important;
+  }
+
+  .high-contrast .slide-thumb {
+    border: 2px solid #666 !important;
+  }
+
+  .high-contrast .slide-thumb.active {
+    border-color: white !important;
+    outline: 2px solid white !important;
+  }
+
+  .high-contrast .chat-message.user {
+    background-color: white !important;
+    color: black !important;
+  }
+
+  .high-contrast .chat-message.assistant {
+    background-color: black !important;
+    color: white !important;
+    border: 2px solid white !important;
+  }
+
+  .high-contrast ::selection {
+    background-color: white !important;
+    color: black !important;
+  }
+
+  .high-contrast ::-webkit-scrollbar-thumb {
+    background-color: white !important;
+  }
+
+  .high-contrast a,
+  .high-contrast button:not(.btn-primary) {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .high-contrast mark {
+    background-color: yellow !important;
+    color: black !important;
+  }
+
   /* Traffic light padding for macOS */
   .traffic-light-padding {
     padding-left: 80px;

@@ -8,6 +8,7 @@ import type {
   AIConversation,
   AIMessage,
   UIState,
+  SessionFeedback,
 } from '@shared/types'
 import { AUTOSAVE_INTERVAL_MS, UI_DEFAULTS } from '@shared/constants'
 
@@ -83,6 +84,10 @@ interface SessionStore {
   // Session metadata
   setSessionName: (name: string) => void
   setPdfFileName: (fileName: string) => void
+
+  // Feedback
+  setFeedback: (rating: number, feedback: string) => void
+  addRecordingDuration: (duration: number) => void
 }
 
 const createEmptySession = (name?: string): Session => ({
@@ -107,6 +112,8 @@ const defaultUIState: UIState = {
   showExportModal: false,
   showSettingsModal: false,
   showShortcutsHelp: false,
+  showSearchModal: false,
+  showFeedbackModal: false,
 }
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null
@@ -448,6 +455,35 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         ? {
             ...state.session,
             pdfFileName: fileName,
+          }
+        : null,
+    }))
+  },
+
+  setFeedback: (rating: number, feedback: string) => {
+    set(state => ({
+      session: state.session
+        ? {
+            ...state.session,
+            feedback: {
+              rating,
+              feedback,
+              submittedAt: new Date().toISOString(),
+            },
+            updatedAt: new Date().toISOString(),
+          }
+        : null,
+    }))
+    // Save immediately after setting feedback
+    get().saveSession()
+  },
+
+  addRecordingDuration: (duration: number) => {
+    set(state => ({
+      session: state.session
+        ? {
+            ...state.session,
+            totalRecordingDuration: (state.session.totalRecordingDuration || 0) + duration,
           }
         : null,
     }))

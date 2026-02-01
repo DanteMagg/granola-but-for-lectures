@@ -2,9 +2,15 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import * as fsPromises from 'fs/promises'
+import { fileURLToPath } from 'url'
 import PDFDocument from 'pdfkit'
-import { registerWhisperHandlers } from './native/whisper-bridge'
-import { registerLLMHandlers } from './native/llm-bridge'
+import { registerWhisperHandlers } from './native/whisper-bridge.js'
+import { registerLLMHandlers } from './native/llm-bridge.js'
+import { logger, log } from './logger.js'
+
+// ES module __dirname polyfill
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 // Export data structure for PDF generation
 interface ExportData {
@@ -19,6 +25,8 @@ interface ExportData {
 }
 
 const isDev = process.env.NODE_ENV !== 'production' || !app.isPackaged
+// Allow forcing DevTools open via env var for debugging production builds
+const openDevTools = isDev || process.env.OPEN_DEVTOOLS === 'true'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -88,9 +96,13 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
-    mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
+  }
+
+  // Open DevTools in dev mode or when explicitly requested
+  if (openDevTools) {
+    mainWindow.webContents.openDevTools()
   }
 
   mainWindow.on('closed', () => {
@@ -265,6 +277,33 @@ ipcMain.handle(
   }
 )
 
+// Delete audio file
+ipcMain.handle(
+  'audio:delete',
+  async (_event, sessionId: string, slideIndex: number) => {
+    const safeSessionId = sanitizeSessionId(sessionId)
+    if (!safeSessionId) {
+      throw new Error('Invalid session ID')
+    }
+
+    const safeSlideIndex = sanitizeSlideIndex(slideIndex)
+    if (safeSlideIndex === null) {
+      throw new Error('Invalid slide index')
+    }
+
+    const audioFile = path.join(sessionsPath, safeSessionId, 'audio', `slide-${safeSlideIndex}.webm`)
+    try {
+      await fsPromises.unlink(audioFile)
+      return true
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return true // File doesn't exist, consider it deleted
+      }
+      throw err
+    }
+  }
+)
+
 // Get app paths
 ipcMain.handle('app:getPaths', async () => {
   return {
@@ -400,3 +439,49 @@ ipcMain.handle(
     })
   }
 )
+
+// ==========================================
+// Logging IPC Handlers
+// ==========================================
+
+// Get log content
+ipcMain.handle('logs:get', async () => {
+  return await logger.getLogContent()
+})
+
+// Get all logs including rotated
+ipcMain.handle('logs:getAll', async () => {
+  return await logger.getAllLogs()
+})
+
+// Clear logs
+ipcMain.handle('logs:clear', async () => {
+  await logger.clearLogs()
+  return true
+})
+
+// Get logs directory path
+ipcMain.handle('logs:getPath', async () => {
+  return logger.getLogPath()
+})
+
+// Log from renderer process
+ipcMain.handle('logs:write', async (_event, level: string, message: string, data?: unknown) => {
+  switch (level) {
+    case 'debug':
+      log.debug(message, data, 'renderer')
+      break
+    case 'info':
+      log.info(message, data, 'renderer')
+      break
+    case 'warn':
+      log.warn(message, data, 'renderer')
+      break
+    case 'error':
+      log.error(message, data, 'renderer')
+      break
+    default:
+      log.info(message, data, 'renderer')
+  }
+  return true
+})

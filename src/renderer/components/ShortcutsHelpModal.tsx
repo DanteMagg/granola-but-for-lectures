@@ -17,6 +17,7 @@ const shortcuts: ShortcutItem[] = [
   { keys: ['A'], description: 'Toggle AI chat', category: 'recording' },
   
   // General
+  { keys: ['⌘', 'K'], description: 'Search slides & notes', category: 'general' },
   { keys: ['⌘', 'S'], description: 'Save session', category: 'general' },
   { keys: ['⌘', 'E'], description: 'Export to PDF', category: 'general' },
   { keys: ['⌘', 'O'], description: 'Import PDF', category: 'general' },

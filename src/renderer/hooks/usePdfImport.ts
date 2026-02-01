@@ -6,8 +6,22 @@ import * as pdfjsLib from 'pdfjs-dist'
 import type { TextItem } from 'pdfjs-dist/types/src/display/api'
 import { toast } from '../stores/toastStore'
 
-// Set up PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+// Set up PDF.js worker - use local bundled worker for offline support
+// Falls back to CDN if local worker fails to load
+const setupPdfWorker = () => {
+  try {
+    // Try to use the worker from node_modules (bundled by Vite)
+    const workerUrl = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url
+    ).toString()
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+  } catch {
+    // Fallback to CDN for development or if bundling fails
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+  }
+}
+setupPdfWorker()
 
 export function usePdfImport() {
   const { setSlides, setPdfFileName, setSessionName, session } =

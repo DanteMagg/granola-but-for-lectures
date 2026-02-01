@@ -72,6 +72,7 @@ class LLMBridge {
   private llama: any = null
   private model: any = null
   private context: any = null
+  private session: any = null
   private downloadAbortController: AbortController | null = null
 
   constructor() {
@@ -95,10 +96,13 @@ class LLMBridge {
     }
 
     try {
-      // Try to load node-llama-cpp
-      const llamaModule = await this.loadLlamaModule()
+      // Dynamic import of node-llama-cpp
+      const llamaModule = await import('node-llama-cpp')
+      
       if (llamaModule) {
         const { getLlama } = llamaModule
+        
+        console.log('Initializing Llama...')
         this.llama = await getLlama()
         
         console.log('Loading model from:', this.config.modelPath)
@@ -106,58 +110,48 @@ class LLMBridge {
           modelPath: this.config.modelPath,
         })
         
+        console.log('Creating context...')
         this.context = await this.model.createContext({
           contextSize: this.config.contextLength,
         })
         
+        // Create a chat session
+        const { LlamaChatSession } = llamaModule
+        this.session = new LlamaChatSession({
+          contextSequence: this.context.getSequence(),
+          systemPrompt: this.getDefaultSystemPrompt(),
+        })
+        
         this.isLoaded = true
-        console.log('LLM initialized successfully')
+        console.log('LLM initialized successfully with model:', this.config.modelName)
         return true
       }
     } catch (error) {
       console.error('Failed to initialize LLM:', error)
+      this.isLoaded = false
     }
     
     return false
   }
 
-  private async loadLlamaModule(): Promise<any> {
-    try {
-      // Dynamic import of node-llama-cpp
-      const llamaModule = await import('node-llama-cpp')
-      return llamaModule
-    } catch (e) {
-      console.log('node-llama-cpp not available, using fallback mode:', e)
-      return null
-    }
-  }
-
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
-    if (!this.isLoaded || !this.context) {
+    if (!this.isLoaded || !this.session) {
       return this.fallbackGenerate(request)
     }
 
     try {
-      const fullPrompt = this.buildPrompt(request)
+      const prompt = this.buildPrompt(request)
       
-      // Create a session for inference
-      const { LlamaChatSession } = await import('node-llama-cpp')
-      const session = new LlamaChatSession({
-        contextSequence: this.context.getSequence(),
-      })
-
-      let responseText = ''
-      const response = await session.prompt(request.prompt, {
+      console.log('Generating response for prompt:', prompt.substring(0, 100) + '...')
+      
+      const response = await this.session.prompt(prompt, {
         maxTokens: request.maxTokens || this.config.maxTokens,
         temperature: request.temperature || this.config.temperature,
-        onTextChunk: (chunk: string) => {
-          responseText += chunk
-        },
       })
 
       return {
-        text: response || responseText,
-        tokensUsed: responseText.length / 4, // Rough estimate
+        text: response,
+        tokensUsed: Math.ceil(response.length / 4), // Rough estimate
         finishReason: 'stop',
       }
     } catch (error) {
@@ -174,23 +168,20 @@ class LLMBridge {
     request: GenerateRequest,
     onChunk: (chunk: string) => void
   ): Promise<GenerateResponse> {
-    if (!this.isLoaded || !this.context) {
+    if (!this.isLoaded || !this.session) {
       const fallback = this.fallbackGenerate(request)
       onChunk(fallback.text)
       return fallback
     }
 
     try {
-      const { LlamaChatSession } = await import('node-llama-cpp')
-      const session = new LlamaChatSession({
-        contextSequence: this.context.getSequence(),
-        systemPrompt: request.systemPrompt || this.getDefaultSystemPrompt(),
-      })
-
+      const prompt = this.buildPrompt(request)
       let fullResponse = ''
       let tokensUsed = 0
 
-      const response = await session.prompt(request.prompt, {
+      console.log('Starting streaming generation...')
+
+      const response = await this.session.prompt(prompt, {
         maxTokens: request.maxTokens || this.config.maxTokens,
         temperature: request.temperature || this.config.temperature,
         onTextChunk: (chunk: string) => {
@@ -207,8 +198,10 @@ class LLMBridge {
       }
     } catch (error) {
       console.error('Stream generation error:', error)
+      const errorMsg = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+      onChunk(errorMsg)
       return {
-        text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        text: errorMsg,
         tokensUsed: 0,
         finishReason: 'error',
       }
@@ -216,18 +209,12 @@ class LLMBridge {
   }
 
   private buildPrompt(request: GenerateRequest): string {
-    const systemPrompt = request.systemPrompt || this.getDefaultSystemPrompt()
+    let prompt = request.prompt
     
-    // TinyLlama/Zephyr format
-    let prompt = `<|system|>\n${systemPrompt}</s>\n`
-    
+    // Add context if provided
     if (request.context) {
-      prompt += `<|user|>\nContext:\n${request.context}\n\nQuestion: ${request.prompt}</s>\n`
-    } else {
-      prompt += `<|user|>\n${request.prompt}</s>\n`
+      prompt = `Context from lecture:\n${request.context}\n\nQuestion: ${request.prompt}`
     }
-    
-    prompt += '<|assistant|>\n'
     
     return prompt
   }
@@ -247,21 +234,21 @@ When the user provides lecture context (slides, notes, transcripts), use that in
       response = `I'd be happy to summarize this content for you.\n\n`
       if (request.context) {
         response += `Based on the lecture content provided:\n\n`
-        response += `The material covers several key topics. To get a proper AI-powered summary, please download a local LLM model from the settings.\n\n`
+        response += `The material covers several key topics. To get a proper AI-powered summary, please download a local LLM model from Settings.\n\n`
         response += `For now, here's the raw content I can see:\n${request.context.substring(0, 500)}...`
       } else {
         response += `Please provide some lecture content (notes, transcript, or navigate to a slide) for me to summarize.`
       }
     } else if (prompt.includes('explain') || prompt.includes('what is') || prompt.includes('how does')) {
       response = `To explain this concept properly, I would need the local LLM model to be loaded.\n\n`
-      response += `You can download a model like TinyLlama (~670MB) from the settings for offline AI assistance.\n\n`
+      response += `You can download a model like TinyLlama (~670MB) from Settings for offline AI assistance.\n\n`
       response += `In the meantime, I can help you navigate your notes or find specific content.`
     } else if (prompt.includes('quiz') || prompt.includes('test') || prompt.includes('question')) {
       response = `I can generate practice questions once the local LLM is set up.\n\n`
       response += `For now, here's a general study tip: Review each slide and try to explain the main concept in your own words.`
     } else {
       response = `I received your question: "${request.prompt}"\n\n`
-      response += `To provide intelligent answers, please download a local LLM model from the settings.\n\n`
+      response += `To provide intelligent answers, please download a local LLM model from Settings.\n\n`
       response += `Available models:\n`
       response += `• TinyLlama 1.1B (~670MB) - Fast, good for summaries\n`
       response += `• Phi-2 (~1.6GB) - Better reasoning\n`
@@ -294,6 +281,10 @@ When the user provides lecture context (slides, notes, transcripts), use that in
       const stats = await fsPromises.stat(destPath)
       if (stats.size > 100000000) { // At least 100MB
         console.log(`Model ${modelName} already exists at ${destPath}`)
+        // Update config
+        this.config.modelPath = destPath
+        this.config.modelName = modelName
+        this.config.contextLength = modelInfo.contextLength
         return { success: true }
       }
     }
@@ -311,9 +302,13 @@ When the user provides lecture context (slides, notes, transcripts), use that in
       this.config.modelName = modelName
       this.config.contextLength = modelInfo.contextLength
       
+      // Reinitialize with new model
+      await this.unload()
+      await this.initialize()
+      
       return { success: true }
     } catch (error: any) {
-      if (error.name === 'AbortError') {
+      if (error.name === 'AbortError' || error.message === 'Download cancelled') {
         try {
           await fsPromises.unlink(destPath)
         } catch { /* ignore */ }
@@ -343,6 +338,7 @@ When the user provides lecture context (slides, notes, transcripts), use that in
         if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 307) {
           const redirectUrl = response.headers.location
           if (redirectUrl) {
+            console.log(`Redirecting to: ${redirectUrl}`)
             this.downloadFile(redirectUrl, destPath, onProgress)
               .then(resolve)
               .catch(reject)
@@ -402,25 +398,28 @@ When the user provides lecture context (slides, notes, transcripts), use that in
       return false
     }
     
-    // Unload current model
-    if (this.model) {
-      try {
-        await this.context?.dispose()
-        await this.model?.dispose()
-      } catch { /* ignore */ }
+    const newPath = path.join(this.modelPath, modelInfo.filename)
+    if (!fs.existsSync(newPath)) {
+      return false
     }
     
-    this.config.modelPath = path.join(this.modelPath, modelInfo.filename)
+    // Unload current model
+    await this.unload()
+    
+    this.config.modelPath = newPath
     this.config.modelName = modelName
     this.config.contextLength = modelInfo.contextLength
-    this.isLoaded = false
-    this.model = null
-    this.context = null
     
-    return true
+    return await this.initialize()
   }
 
   async unload(): Promise<void> {
+    if (this.session) {
+      try {
+        // Session doesn't need explicit disposal in newer versions
+        this.session = null
+      } catch { /* ignore */ }
+    }
     if (this.context) {
       try {
         await this.context.dispose()
@@ -434,19 +433,18 @@ When the user provides lecture context (slides, notes, transcripts), use that in
     this.isLoaded = false
     this.model = null
     this.context = null
+    this.session = null
   }
 
   async deleteModel(): Promise<boolean> {
-    if (fs.existsSync(this.modelPath)) {
-      try {
-        await this.unload()
+    try {
+      await this.unload()
+      if (fs.existsSync(this.modelPath)) {
         fs.rmSync(this.modelPath, { recursive: true, force: true })
-        this.isLoaded = false
         return true
-      } catch (e) {
-        console.error('Error deleting model:', e)
-        return false
       }
+    } catch (e) {
+      console.error('Error deleting model:', e)
     }
     return false
   }
@@ -527,11 +525,7 @@ export function registerLLMHandlers() {
   })
 
   ipcMain.handle('llm:setModel', async (_event, modelName: string) => {
-    const success = await bridge.setModel(modelName)
-    if (success) {
-      return await bridge.initialize()
-    }
-    return false
+    return await bridge.setModel(modelName)
   })
 
   ipcMain.handle('llm:unload', async () => {
@@ -540,18 +534,17 @@ export function registerLLMHandlers() {
   })
 
   ipcMain.handle('llm:downloadModel', async (event, modelName: string) => {
-    // const window = BrowserWindow.fromWebContents(event.sender)
-    
     const result = await bridge.downloadModel(modelName, (downloaded, total) => {
       const percent = total > 0 ? Math.round((downloaded / total) * 100) : 0
-      event.sender.send('download:progress', {
-        model: 'llm',
-        progress: percent,
-        status: percent === 100 ? 'completed' : 'downloading'
+      event.sender.send('llm:downloadProgress', {
+        modelName,
+        downloaded,
+        total,
+        percent,
       })
     })
 
-    return result.success
+    return result
   })
 
   ipcMain.handle('llm:deleteModel', async () => {

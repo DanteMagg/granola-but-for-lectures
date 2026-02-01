@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
-import { Settings, Download, FolderOpen, Sparkles, Keyboard } from 'lucide-react'
+import { Settings, Download, FolderOpen, Sparkles, Keyboard, Search } from 'lucide-react'
 
 export function Header() {
   const { session, ui, setUIState, setSessionName } = useSessionStore()
@@ -31,7 +31,11 @@ export function Header() {
   }
 
   return (
-    <header className="h-12 flex items-center justify-between px-4 border-b border-border bg-white/80 backdrop-blur-md draggable traffic-light-padding z-10">
+    <header 
+      className="h-12 flex items-center justify-between px-4 border-b border-border bg-white/80 backdrop-blur-md draggable traffic-light-padding z-10"
+      role="banner"
+      aria-label="Application header"
+    >
       {/* Left section */}
       <div className="flex items-center gap-3 non-draggable">
         <div className="flex items-center gap-2">
@@ -75,6 +79,15 @@ export function Header() {
       <div className="flex items-center gap-2 non-draggable">
         {session && (
           <>
+            <button
+              onClick={() => setUIState({ showSearchModal: true })}
+              className="btn btn-ghost btn-sm"
+              title="Search (⌘K)"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Search</span>
+            </button>
+
             <button
               onClick={() => setUIState({ showAIChat: !ui.showAIChat })}
               className={`btn btn-sm ${ui.showAIChat ? 'bg-zinc-100 text-foreground' : 'btn-ghost'}`}

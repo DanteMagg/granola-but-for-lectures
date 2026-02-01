@@ -106,6 +106,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Audio operations
   saveAudio: (sessionId: string, audioData: string, slideIndex: number) =>
     ipcRenderer.invoke('audio:save', sessionId, audioData, slideIndex),
+  deleteAudio: (sessionId: string, slideIndex: number) =>
+    ipcRenderer.invoke('audio:delete', sessionId, slideIndex),
   
   // App paths
   getPaths: () => ipcRenderer.invoke('app:getPaths'),
@@ -140,8 +142,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('whisper:cancelDownload'),
   
   // Whisper download progress listener
-  onWhisperDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, progress: DownloadProgress) => callback(progress)
+  onWhisperDownloadProgress: (callback: (progress: { modelName: string; downloaded: number; total: number; percent: number }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: { modelName: string; downloaded: number; total: number; percent: number }) => callback(progress)
     ipcRenderer.on('whisper:downloadProgress', handler)
     // Return unsubscribe function
     return () => ipcRenderer.removeListener('whisper:downloadProgress', handler)
@@ -178,8 +180,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('llm:cancelDownload'),
   
   // LLM download progress listener
-  onLLMDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, progress: DownloadProgress) => callback(progress)
+  onLLMDownloadProgress: (callback: (progress: { modelName: string; downloaded: number; total: number; percent: number }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: { modelName: string; downloaded: number; total: number; percent: number }) => callback(progress)
     ipcRenderer.on('llm:downloadProgress', handler)
     return () => ipcRenderer.removeListener('llm:downloadProgress', handler)
   },
@@ -190,6 +192,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('llm:chunk', handler)
     return () => ipcRenderer.removeListener('llm:chunk', handler)
   },
+
+  // ==========================================
+  // Logging operations
+  // ==========================================
+  
+  logsGet: () => ipcRenderer.invoke('logs:get'),
+  logsGetAll: () => ipcRenderer.invoke('logs:getAll'),
+  logsClear: () => ipcRenderer.invoke('logs:clear'),
+  logsGetPath: () => ipcRenderer.invoke('logs:getPath'),
+  logsWrite: (level: string, message: string, data?: unknown) =>
+    ipcRenderer.invoke('logs:write', level, message, data),
 })
 
 // Type definitions for the exposed API
@@ -221,6 +234,7 @@ export interface ElectronAPI {
     audioData: string,
     slideIndex: number
   ) => Promise<string>
+  deleteAudio: (sessionId: string, slideIndex: number) => Promise<boolean>
   
   // Paths
   getPaths: () => Promise<{ userData: string; sessions: string }>
@@ -251,6 +265,13 @@ export interface ElectronAPI {
   llmCancelDownload: () => Promise<boolean>
   onLLMDownloadProgress: (callback: (progress: DownloadProgress) => void) => () => void
   onLLMChunk: (callback: (chunk: string) => void) => () => void
+
+  // Logging
+  logsGet: () => Promise<string>
+  logsGetAll: () => Promise<string>
+  logsClear: () => Promise<boolean>
+  logsGetPath: () => Promise<string>
+  logsWrite: (level: string, message: string, data?: unknown) => Promise<boolean>
 }
 
 declare global {

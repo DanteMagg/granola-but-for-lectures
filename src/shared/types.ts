@@ -53,6 +53,8 @@ export interface Session {
   currentSlideIndex: number
   isRecording: boolean
   recordingStartTime?: number
+  feedback?: SessionFeedback
+  totalRecordingDuration?: number // Total ms recorded
   createdAt: string
   updatedAt: string
 }
@@ -84,6 +86,15 @@ export interface UIState {
   showExportModal: boolean
   showSettingsModal: boolean
   showShortcutsHelp: boolean
+  showSearchModal: boolean
+  showFeedbackModal: boolean
+}
+
+// Session feedback
+export interface SessionFeedback {
+  rating: number
+  feedback: string
+  submittedAt: string
 }
 
 // Export options

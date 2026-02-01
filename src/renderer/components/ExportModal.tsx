@@ -15,6 +15,7 @@ export function ExportModal({ onClose }: ExportModalProps) {
     includeNotes: true,
     includeTranscripts: true,
     slideRange: 'all',
+    customRange: { start: 1, end: session?.slides.length || 1 },
   })
   const [isExporting, setIsExporting] = useState(false)
 
@@ -33,20 +34,31 @@ export function ExportModal({ onClose }: ExportModalProps) {
       }
 
       // Determine which slides to export
-      const slidesToExport =
-        options.slideRange === 'current'
-          ? [session.slides[session.currentSlideIndex]]
-          : session.slides
+      let slidesToExport
+      if (options.slideRange === 'current') {
+        slidesToExport = [session.slides[session.currentSlideIndex]]
+      } else if (options.slideRange === 'custom' && options.customRange) {
+        const start = Math.max(0, options.customRange.start - 1)
+        const end = Math.min(session.slides.length, options.customRange.end)
+        slidesToExport = session.slides.slice(start, end)
+      } else {
+        slidesToExport = session.slides
+      }
+
+      // Calculate starting index for slide numbers
+      let startIndex = 1
+      if (options.slideRange === 'current') {
+        startIndex = session.currentSlideIndex + 1
+      } else if (options.slideRange === 'custom' && options.customRange) {
+        startIndex = options.customRange.start
+      }
 
       // Prepare export data
       const exportData = {
         sessionName: session.name,
         exportedAt: new Date().toISOString(),
         slides: slidesToExport.map((slide, idx) => ({
-          index:
-            options.slideRange === 'current'
-              ? session.currentSlideIndex + 1
-              : idx + 1,
+          index: startIndex + idx,
           imageData: options.includeSlides ? slide.imageData : null,
           note: options.includeNotes
             ? (session.notes[slide.id]?.plainText ?? null)
@@ -172,8 +184,8 @@ export function ExportModal({ onClose }: ExportModalProps) {
           {/* Slide range */}
           <div className="pt-5 border-t border-border">
             <p className="text-sm font-medium text-foreground mb-3">Slide Range</p>
-            <div className="flex gap-2">
-              {(['all', 'current'] as const).map((range) => (
+            <div className="flex flex-wrap gap-2">
+              {(['all', 'current', 'custom'] as const).map((range) => (
                 <button
                   key={range}
                   onClick={() => setOptions({ ...options, slideRange: range })}
@@ -184,10 +196,60 @@ export function ExportModal({ onClose }: ExportModalProps) {
                       : 'bg-white text-muted-foreground border-input hover:bg-zinc-50 hover:text-foreground'
                   )}
                 >
-                  {range === 'all' ? 'All Slides' : 'Current Slide Only'}
+                  {range === 'all' ? 'All Slides' : range === 'current' ? 'Current Slide' : 'Custom Range'}
                 </button>
               ))}
             </div>
+
+            {/* Custom range inputs */}
+            {options.slideRange === 'custom' && (
+              <div className="flex items-center gap-3 mt-3 animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground">From</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={slideCount}
+                    value={options.customRange?.start || 1}
+                    onChange={(e) => {
+                      const start = Math.max(1, Math.min(slideCount, parseInt(e.target.value) || 1))
+                      setOptions({
+                        ...options,
+                        customRange: { 
+                          start, 
+                          end: Math.max(start, options.customRange?.end || slideCount) 
+                        },
+                      })
+                    }}
+                    className="input w-16 text-center py-1.5"
+                  />
+                </div>
+                <span className="text-muted-foreground">—</span>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground">To</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={slideCount}
+                    value={options.customRange?.end || slideCount}
+                    onChange={(e) => {
+                      const end = Math.max(1, Math.min(slideCount, parseInt(e.target.value) || slideCount))
+                      setOptions({
+                        ...options,
+                        customRange: { 
+                          start: Math.min(end, options.customRange?.start || 1), 
+                          end 
+                        },
+                      })
+                    }}
+                    className="input w-16 text-center py-1.5"
+                  />
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  of {slideCount} slides
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

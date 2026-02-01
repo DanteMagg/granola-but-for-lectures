@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Download, HardDrive, Cpu, Mic, Trash2, CheckCircle2, AlertCircle, XCircle } from 'lucide-react'
+import { X, Download, HardDrive, Cpu, Mic, Trash2, CheckCircle2, AlertCircle, XCircle, Eye } from 'lucide-react'
 import { clsx } from 'clsx'
+import { useAccessibility } from '../hooks/useAccessibility'
 
 interface SettingsModalProps {
   onClose: () => void
@@ -50,7 +51,7 @@ interface DownloadState {
 export function SettingsModal({ onClose }: SettingsModalProps) {
   const [whisperInfo, setWhisperInfo] = useState<WhisperModelInfo | null>(null)
   const [llmInfo, setLlmInfo] = useState<LLMModelInfo | null>(null)
-  const [activeTab, setActiveTab] = useState<'models' | 'storage' | 'about'>('models')
+  const [activeTab, setActiveTab] = useState<'models' | 'accessibility' | 'storage' | 'about'>('models')
   
   const [whisperDownload, setWhisperDownload] = useState<DownloadState>({
     isDownloading: false,
@@ -137,13 +138,14 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     try {
       setWhisperDownload({ isDownloading: true, progress: 0, modelName: selectedWhisperModel, error: null })
       const result = await window.electronAPI.whisperDownloadModel(selectedWhisperModel)
-      if (!result.success) {
+      if (result && !result.success) {
         setWhisperDownload(prev => ({ 
           ...prev, 
           isDownloading: false, 
           error: result.error || 'Download failed' 
         }))
-      } else {
+      } else if (result?.success) {
+        setWhisperDownload(prev => ({ ...prev, isDownloading: false }))
         loadModelInfo()
       }
     } catch (err) {
@@ -168,13 +170,14 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     try {
       setLlmDownload({ isDownloading: true, progress: 0, modelName: selectedLlmModel, error: null })
       const result = await window.electronAPI.llmDownloadModel(selectedLlmModel)
-      if (!result.success) {
+      if (result && !result.success) {
         setLlmDownload(prev => ({ 
           ...prev, 
           isDownloading: false, 
           error: result.error || 'Download failed' 
         }))
-      } else {
+      } else if (result?.success) {
+        setLlmDownload(prev => ({ ...prev, isDownloading: false }))
         loadModelInfo()
       }
     } catch (err) {
@@ -221,8 +224,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
+  const { highContrast, autoDeleteAudio, setHighContrast, setAutoDeleteAudio } = useAccessibility()
+
   const tabs = [
     { id: 'models', label: 'AI Models', icon: Cpu },
+    { id: 'accessibility', label: 'Accessibility', icon: Eye },
     { id: 'storage', label: 'Storage', icon: HardDrive },
     { id: 'about', label: 'About', icon: null },
   ] as const
@@ -515,6 +521,74 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             </div>
           )}
 
+          {activeTab === 'accessibility' && (
+            <div className="space-y-4">
+              <div className="panel p-4 bg-white">
+                <h3 className="font-medium text-foreground mb-3">Display</h3>
+                <label className="flex items-center justify-between cursor-pointer group p-2 hover:bg-zinc-50 rounded-lg transition-colors">
+                  <div>
+                    <span className="text-sm font-medium text-foreground">
+                      High Contrast Mode
+                    </span>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Increases contrast for better readability
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setHighContrast(!highContrast)}
+                    className={clsx(
+                      'relative w-11 h-6 rounded-full transition-colors',
+                      highContrast ? 'bg-zinc-900' : 'bg-zinc-200'
+                    )}
+                    role="switch"
+                    aria-checked={highContrast}
+                  >
+                    <span
+                      className={clsx(
+                        'absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform',
+                        highContrast && 'translate-x-5'
+                      )}
+                    />
+                  </button>
+                </label>
+              </div>
+
+              <div className="panel p-4 bg-white">
+                <h3 className="font-medium text-foreground mb-3">Privacy</h3>
+                <label className="flex items-center justify-between cursor-pointer group p-2 hover:bg-zinc-50 rounded-lg transition-colors">
+                  <div>
+                    <span className="text-sm font-medium text-foreground">
+                      Auto-delete Audio Files
+                    </span>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Remove recordings after transcription
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAutoDeleteAudio(!autoDeleteAudio)}
+                    className={clsx(
+                      'relative w-11 h-6 rounded-full transition-colors',
+                      autoDeleteAudio ? 'bg-zinc-900' : 'bg-zinc-200'
+                    )}
+                    role="switch"
+                    aria-checked={autoDeleteAudio}
+                  >
+                    <span
+                      className={clsx(
+                        'absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform',
+                        autoDeleteAudio && 'translate-x-5'
+                      )}
+                    />
+                  </button>
+                </label>
+              </div>
+
+              <p className="text-[10px] text-muted-foreground text-center px-4">
+                These settings are saved locally and persist across sessions.
+              </p>
+            </div>
+          )}
+
           {activeTab === 'storage' && (
             <div className="space-y-4">
               <div className="panel p-4 bg-white">
@@ -528,20 +602,58 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               </div>
 
               <div className="panel p-4 bg-white">
-                <h3 className="font-medium text-foreground mb-3">Audio Recordings</h3>
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <input
-                    type="checkbox"
-                    className="rounded border-input text-zinc-900 focus:ring-zinc-900"
-                    defaultChecked
-                  />
-                  <span className="text-sm text-foreground group-hover:text-zinc-900 transition-colors">
-                    Auto-delete audio after transcription
-                  </span>
-                </label>
-                <p className="text-[10px] text-muted-foreground mt-2 ml-7">
-                  Saves disk space by removing audio files after they're transcribed.
-                </p>
+                <h3 className="font-medium text-foreground mb-3">Diagnostics</h3>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Export Logs</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Copy application logs for troubleshooting
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const logs = await window.electronAPI.logsGetAll()
+                        await navigator.clipboard.writeText(logs)
+                        // Could add toast notification here
+                        alert('Logs copied to clipboard!')
+                      } catch (err) {
+                        console.error('Failed to export logs:', err)
+                        alert('Failed to export logs')
+                      }
+                    }}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Copy to Clipboard
+                  </button>
+                </div>
+              </div>
+
+              <div className="panel p-4 bg-white">
+                <h3 className="font-medium text-foreground mb-3">Clear Data</h3>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Clear Logs</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Delete all log files
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (confirm('Are you sure you want to clear all logs?')) {
+                        try {
+                          await window.electronAPI.logsClear()
+                          alert('Logs cleared!')
+                        } catch (err) {
+                          console.error('Failed to clear logs:', err)
+                        }
+                      }
+                    }}
+                    className="btn btn-secondary btn-sm text-red-600 hover:text-red-700"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
             </div>
           )}
