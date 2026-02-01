@@ -9,19 +9,28 @@ import { createLogger } from '../lib/logger'
 
 const log = createLogger('pdfImport')
 
-// Set up PDF.js worker - use local bundled worker for offline support
-// Falls back to CDN if local worker fails to load
+// Security: Maximum PDF file size (100MB)
+const MAX_PDF_SIZE_BYTES = 100 * 1024 * 1024
+// Security: Maximum number of pages to prevent DoS
+const MAX_PDF_PAGES = 500
+
+// Set up PDF.js worker - use local bundled worker for security
+// CDN fallback removed for production security
 const setupPdfWorker = () => {
   try {
-    // Try to use the worker from node_modules (bundled by Vite)
+    // Use the worker from node_modules (bundled by Vite)
     const workerUrl = new URL(
       'pdfjs-dist/build/pdf.worker.min.mjs',
       import.meta.url
     ).toString()
     pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
-  } catch {
-    // Fallback to CDN for development or if bundling fails
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+  } catch (e) {
+    // Log error but don't fallback to CDN for security
+    log.error('Failed to load local PDF.js worker', e)
+    // In dev mode only, allow CDN fallback
+    if (import.meta.env.DEV) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+    }
   }
 }
 setupPdfWorker()
@@ -35,15 +44,32 @@ export function usePdfImport() {
 
   // Process PDF data (shared logic for both dialog and drag & drop)
   const processPdfData = useCallback(async (pdfData: Uint8Array, fileName: string) => {
+    // Security: Validate file size
+    if (pdfData.byteLength > MAX_PDF_SIZE_BYTES) {
+      const sizeMB = Math.round(pdfData.byteLength / (1024 * 1024))
+      throw new Error(`PDF file too large (${sizeMB}MB). Maximum size is ${MAX_PDF_SIZE_BYTES / (1024 * 1024)}MB.`)
+    }
+
     // Update session metadata
     setPdfFileName(fileName)
     if (session?.name === 'Untitled Session') {
       setSessionName(fileName.replace('.pdf', ''))
     }
 
-    // Load PDF document
-    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise
+    // Load PDF document with security options
+    const pdf = await pdfjsLib.getDocument({ 
+      data: pdfData,
+      // Security: Disable features that could be exploited
+      disableAutoFetch: true,
+      disableStream: true,
+      isEvalSupported: false, // Disable eval in PDF.js
+    }).promise
     const numPages = pdf.numPages
+
+    // Security: Validate page count
+    if (numPages > MAX_PDF_PAGES) {
+      throw new Error(`PDF has too many pages (${numPages}). Maximum is ${MAX_PDF_PAGES} pages.`)
+    }
 
     const slides: Slide[] = []
 
@@ -140,6 +166,15 @@ export function usePdfImport() {
       const errorMsg = 'Please drop a PDF file'
       setError(errorMsg)
       toast.error('Invalid File', errorMsg)
+      return false
+    }
+
+    // Security: Validate file size
+    if (file.size > MAX_PDF_SIZE_BYTES) {
+      const sizeMB = Math.round(file.size / (1024 * 1024))
+      const errorMsg = `PDF file too large (${sizeMB}MB). Maximum size is ${MAX_PDF_SIZE_BYTES / (1024 * 1024)}MB.`
+      setError(errorMsg)
+      toast.error('File Too Large', errorMsg)
       return false
     }
 

@@ -208,7 +208,7 @@ describe('Sidebar', () => {
       render(<Sidebar />)
       
       // Hover over first session to show delete button
-      const firstSession = screen.getByText('Session 1').closest('button')!
+      const firstSession = screen.getByText('Session 1').closest('[role="button"]')!
       fireEvent.mouseEnter(firstSession)
       
       // Click delete
@@ -231,12 +231,12 @@ describe('Sidebar', () => {
       
       render(<Sidebar />)
       
-      const firstSession = screen.getByText('Session 1').closest('button')!
+      const firstSession = screen.getByText('Session 1').closest('[role="button"]')!
       fireEvent.mouseEnter(firstSession)
-      
+
       const deleteButton = screen.getAllByTitle('Delete session')[0]
       fireEvent.click(deleteButton)
-      
+
       expect(deleteSessionSpy).not.toHaveBeenCalled()
     })
 
@@ -252,12 +252,12 @@ describe('Sidebar', () => {
       
       render(<Sidebar />)
       
-      const firstSession = screen.getByText('Session 1').closest('button')!
+      const firstSession = screen.getByText('Session 1').closest('[role="button"]')!
       fireEvent.mouseEnter(firstSession)
-      
+
       const deleteButton = screen.getAllByTitle('Delete session')[0]
       fireEvent.click(deleteButton)
-      
+
       // Delete should be called, but NOT loadSession
       expect(deleteSessionSpy).toHaveBeenCalled()
       // loadSession should not be called from the delete click

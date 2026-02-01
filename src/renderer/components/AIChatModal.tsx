@@ -1,8 +1,15 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
 import { X, Send, Sparkles, ChevronDown, Copy, Check, Square, Settings, AlertCircle, Lightbulb, HelpCircle, BookOpen } from 'lucide-react'
 import { clsx } from 'clsx'
 import { AI_CONFIG } from '@shared/constants'
+import {
+  buildChatPrompt,
+  truncateContext,
+  type ChatContext,
+  type ConversationMessage
+} from '@shared/prompts/chat-prompts'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 type ContextType = typeof AI_CONFIG.CONTEXT_TYPES[number]
 
@@ -51,6 +58,7 @@ export function AIChatModal() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<boolean>(false)
   const unsubscribeRef = useRef<(() => void) | null>(null)
+  const focusTrapRef = useFocusTrap<HTMLDivElement>(true)
 
   // Get current conversation or messages from all conversations
   const currentConversation = session?.aiConversations[session.aiConversations.length - 1]
@@ -113,94 +121,86 @@ export function AIChatModal() {
     }, 100)
   }
 
-  const getContextText = useCallback((overrideContext?: ContextType): string => {
-    if (!session) return ''
+  // Build context object for the new prompt system
+  const buildLectureContext = useCallback((overrideContext?: ContextType): ChatContext => {
+    if (!session) return {}
 
     const activeContext = overrideContext || context
 
     switch (activeContext) {
       case 'current-slide': {
         const slide = session.slides[session.currentSlideIndex]
-        if (!slide) return ''
+        if (!slide) return {}
         
         const note = session.notes[slide.id]
         const enhancedNote = session.enhancedNotes?.[slide.id]
         const transcripts = session.transcripts[slide.id] || []
         
-        let contextText = `## Current Slide Context
-Slide ${session.currentSlideIndex + 1} of ${session.slides.length}
-`
-        if (slide.extractedText) {
-          contextText += `\n### Slide Content\n${slide.extractedText}\n`
+        return {
+          sessionName: session.name,
+          slideIndex: session.currentSlideIndex + 1,
+          totalSlides: session.slides.length,
+          slideContent: slide.extractedText,
+          userNotes: note?.plainText,
+          enhancedNotes: enhancedNote?.status === 'complete' ? enhancedNote.plainText : undefined,
+          transcript: transcripts.map(t => t.text).join(' ')
         }
-        if (note?.plainText) {
-          contextText += `\n### Student's Notes\n${note.plainText}\n`
-        }
-        if (enhancedNote?.status === 'complete') {
-          contextText += `\n### Enhanced Notes\n${enhancedNote.plainText}\n`
-        }
-        if (transcripts.length > 0) {
-          contextText += `\n### Professor's Transcript\n${transcripts.map(t => t.text).join(' ')}\n`
-        }
-        return contextText
       }
       
       case 'all-slides': {
-        let contextText = `## Full Lecture Context
-Total slides: ${session.slides.length}
-Session: ${session.name}
-
-`
-        contextText += session.slides.map((slide, i) => {
+        // Combine all slides into a single context
+        const allContent = session.slides.map((slide, i) => {
           const note = session.notes[slide.id]
           const enhancedNote = session.enhancedNotes?.[slide.id]
           const transcripts = session.transcripts[slide.id] || []
           
-          let text = `### Slide ${i + 1}`
-          if (slide.extractedText) text += `\nContent: ${slide.extractedText}`
-          if (note?.plainText) text += `\nNotes: ${note.plainText}`
-          if (enhancedNote?.status === 'complete') text += `\nEnhanced: ${enhancedNote.plainText}`
-          if (transcripts.length > 0) text += `\nTranscript: ${transcripts.map(t => t.text).join(' ')}`
+          let text = `[Slide ${i + 1}]`
+          if (slide.extractedText) text += ` ${slide.extractedText}`
+          if (note?.plainText) text += ` Notes: ${note.plainText}`
+          if (enhancedNote?.status === 'complete') text += ` Enhanced: ${enhancedNote.plainText}`
+          if (transcripts.length > 0) text += ` Transcript: ${transcripts.map(t => t.text).join(' ')}`
           
           return text
         }).join('\n\n')
         
-        return contextText
+        return {
+          sessionName: session.name,
+          totalSlides: session.slides.length,
+          slideContent: allContent
+        }
       }
       
       case 'all-notes': {
-        return `## All Notes
-` + Object.entries(session.notes)
+        const allNotes = Object.entries(session.notes)
           .map(([slideId, note]) => {
             const slideIndex = session.slides.findIndex(s => s.id === slideId)
             const enhancedNote = session.enhancedNotes?.[slideId]
-            let text = `### Slide ${slideIndex + 1}\nOriginal: ${note.plainText}`
+            let text = `[Slide ${slideIndex + 1}] ${note.plainText}`
             if (enhancedNote?.status === 'complete') {
-              text += `\nEnhanced: ${enhancedNote.plainText}`
+              text += ` | Enhanced: ${enhancedNote.plainText}`
             }
             return text
           })
-          .join('\n\n')
+          .join('\n')
+        
+        return {
+          sessionName: session.name,
+          userNotes: allNotes
+        }
       }
       
       default:
-        return ''
+        return {}
     }
   }, [session, context])
 
-  // System prompt for slide-aware chat
-  const getSystemPrompt = useCallback((): string => {
-    return `You are a helpful lecture assistant. The student is reviewing their lecture notes and may ask questions about the content.
-
-Your role:
-- Help explain concepts from the lecture slides and transcript
-- Answer questions based on the provided context
-- Be concise but thorough
-- Reference specific slide numbers when relevant
-- If asked to quiz, create meaningful questions that test understanding
-
-Always base your answers on the provided lecture context. If information isn't in the context, say so.`
-  }, [])
+  // Convert message history to format expected by prompt builder
+  const conversationHistory = useMemo((): ConversationMessage[] => {
+    return messages.map(m => ({
+      role: m.role,
+      content: m.content
+    }))
+  }, [messages])
 
   const handleStopGenerating = () => {
     abortRef.current = true
@@ -242,8 +242,17 @@ Always base your answers on the provided lecture context. If information isn't i
       return
     }
 
-    const contextText = getContextText(overrideContext)
-    const systemPrompt = getSystemPrompt()
+    // Build context and prompts using new system
+    const lectureContext = buildLectureContext(overrideContext)
+    const truncatedContext = truncateContext(lectureContext, 1500)
+    const isFirstMessage = messages.length === 0
+    
+    const { systemPrompt, userPrompt } = buildChatPrompt({
+      userMessage,
+      context: truncatedContext,
+      conversationHistory: conversationHistory,
+      includeExamples: isFirstMessage
+    })
 
     try {
       // Try streaming first
@@ -275,35 +284,37 @@ Always base your answers on the provided lecture context. If information isn't i
           }
         })
 
-        // Start streaming generation
-        const response = await window.electronAPI.llmGenerateStream({
-          prompt: userMessage,
-          context: contextText,
-          systemPrompt,
-          maxTokens: 1024,
-          temperature: 0.7,
-        })
+        try {
+          // Start streaming generation with built prompt
+          const response = await window.electronAPI.llmGenerateStream({
+            prompt: userPrompt,
+            systemPrompt,
+            maxTokens: 1024,
+            temperature: 0.7,
+          })
 
-        // Cleanup
-        if (unsubscribeRef.current) {
-          unsubscribeRef.current()
-          unsubscribeRef.current = null
-        }
+          // Check abort after streaming completes
+          if (abortRef.current) return
 
-        // If streaming didn't produce content, use the final response
-        if (!fullResponse && response.text) {
-          if (updateAIMessage) {
-            updateAIMessage(conversationId || session.aiConversations[session.aiConversations.length - 1]?.id, messageId, response.text)
+          // If streaming didn't produce content, use the final response
+          if (!fullResponse && response.text) {
+            if (updateAIMessage) {
+              updateAIMessage(conversationId || session.aiConversations[session.aiConversations.length - 1]?.id, messageId, response.text)
+            }
           }
+        } finally {
+          // Always cleanup the listener, even on error or abort
+          if (unsubscribeRef.current) {
+            unsubscribeRef.current()
+            unsubscribeRef.current = null
+          }
+          setStreamingMessageId(null)
+          setIsStreaming(false)
         }
-
-        setStreamingMessageId(null)
-        setIsStreaming(false)
       } else {
-        // Fallback to non-streaming
+        // Fallback to non-streaming with built prompt
         const response = await window.electronAPI.llmGenerate({
-          prompt: userMessage,
-          context: contextText,
+          prompt: userPrompt,
           systemPrompt,
           maxTokens: 1024,
           temperature: 0.7,
@@ -330,7 +341,7 @@ Always base your answers on the provided lecture context. If information isn't i
       setIsStreaming(false)
       setStreamingMessageId(null)
     }
-  }, [session, isLoading, currentConversation, context, llmStatus.available, getContextText, getSystemPrompt, addAIMessage, updateAIMessage])
+  }, [session, isLoading, currentConversation, context, llmStatus.available, buildLectureContext, conversationHistory, messages, addAIMessage, updateAIMessage])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -398,29 +409,41 @@ Always base your answers on the provided lecture context. If information isn't i
   return (
     <div className="modal-overlay" onClick={handleClose}>
       <div 
-        className="modal-content max-w-2xl h-[600px] flex flex-col"
+        ref={focusTrapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ai-chat-modal-title"
+        className="modal-content max-w-2xl h-[600px] flex flex-col transform transition-all duration-300 ease-out scale-100 opacity-100"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-zinc-50/50">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-zinc-50/50 rounded-t-xl">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-zinc-900 flex items-center justify-center shadow-sm">
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 flex items-center justify-center shadow-sm ring-1 ring-black/5">
               <Sparkles className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground tracking-tight">Ask AI</h2>
-              <p className="text-xs text-muted-foreground">
-                {llmStatus.available 
-                  ? `Using ${llmStatus.modelName || 'Local LLM'}`
-                  : 'No model installed'}
+              <h2 id="ai-chat-modal-title" className="text-lg font-semibold text-foreground tracking-tight">Ask AI</h2>
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                {llmStatus.available ? (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                    Using {llmStatus.modelName || 'Local LLM'}
+                  </>
+                ) : (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                    No model installed
+                  </>
+                )}
               </p>
             </div>
           </div>
           <button
             onClick={handleClose}
-            className="p-2 hover:bg-zinc-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-zinc-100 rounded-lg transition-colors text-muted-foreground hover:text-foreground"
           >
-            <X className="w-5 h-5 text-muted-foreground" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 

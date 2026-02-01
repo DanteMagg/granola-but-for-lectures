@@ -73,7 +73,7 @@ describe('TranscriptPanel', () => {
 
       render(<TranscriptPanel />)
       
-      expect(screen.getByText('Recording')).toBeInTheDocument()
+      expect(screen.getByText('Live')).toBeInTheDocument()
     })
   })
 
@@ -93,8 +93,7 @@ describe('TranscriptPanel', () => {
 
       render(<TranscriptPanel />)
       
-      expect(screen.getByText('No transcript for this slide yet.')).toBeInTheDocument()
-      expect(screen.getByText('Start recording to capture lecture audio.')).toBeInTheDocument()
+      expect(screen.getByText('No transcript yet')).toBeInTheDocument()
     })
 
     it('should show listening message when recording but no transcript yet', () => {
@@ -112,7 +111,7 @@ describe('TranscriptPanel', () => {
 
       render(<TranscriptPanel />)
       
-      expect(screen.getByText('Listening for speech...')).toBeInTheDocument()
+      expect(screen.getByText('Listening...')).toBeInTheDocument()
     })
   })
 
@@ -141,7 +140,7 @@ describe('TranscriptPanel', () => {
       expect(screen.getByText('1:05')).toBeInTheDocument() // Second timestamp (65 seconds)
     })
 
-    it('should show low confidence warning for low confidence segments', () => {
+    it('should show low confidence styling for low confidence segments', () => {
       const slide = createMockSlide({ id: 'slide-1' })
       const segments: TranscriptSegment[] = [
         { id: 'seg-1', slideId: 'slide-1', text: 'Unclear audio', startTime: 0, endTime: 1000, confidence: 0.6 },
@@ -158,13 +157,15 @@ describe('TranscriptPanel', () => {
 
       render(<TranscriptPanel />)
       
-      expect(screen.getByText('Unclear audio')).toBeInTheDocument()
-      expect(screen.getByText(/Low confidence/)).toBeInTheDocument()
+      const segmentText = screen.getByText('Unclear audio')
+      expect(segmentText).toBeInTheDocument()
+      // Low confidence segments have italic styling
+      expect(segmentText).toHaveClass('italic')
     })
   })
 
   describe('collapse/expand', () => {
-    it('should toggle expand/collapse when button is clicked', () => {
+    it('should toggle expand/collapse when header is clicked', () => {
       const slide = createMockSlide({ id: 'slide-1' })
       
       mockUseSessionStore.mockReturnValue({
@@ -179,21 +180,25 @@ describe('TranscriptPanel', () => {
       render(<TranscriptPanel />)
       
       // Initially expanded, so empty state message should be visible
-      expect(screen.getByText('No transcript for this slide yet.')).toBeInTheDocument()
+      expect(screen.getByText('No transcript yet')).toBeInTheDocument()
       
-      // Click collapse button
-      const collapseButton = screen.getByTitle('Collapse')
-      fireEvent.click(collapseButton)
+      // Click the header button to collapse (the whole header is now a button)
+      const headerButton = screen.getByText('Transcript').closest('button')!
+      fireEvent.click(headerButton)
       
-      // Content should be hidden
-      expect(screen.queryByText('No transcript for this slide yet.')).not.toBeInTheDocument()
+      // Content should have hidden classes
+      // Get the wrapper div (p -> div.text-center -> div.overflow-y-auto)
+      const contentText = screen.getByText('No transcript yet')
+      const wrapper = contentText.parentElement?.parentElement
+      expect(wrapper).toHaveClass('opacity-0')
+      expect(wrapper).toHaveClass('invisible')
       
-      // Click expand button
-      const expandButton = screen.getByTitle('Expand')
-      fireEvent.click(expandButton)
+      // Click header again to expand
+      fireEvent.click(headerButton)
       
       // Content should be visible again
-      expect(screen.getByText('No transcript for this slide yet.')).toBeInTheDocument()
+      expect(wrapper).toHaveClass('opacity-100')
+      expect(wrapper).not.toHaveClass('invisible')
     })
   })
 

@@ -32,17 +32,17 @@ export function Header() {
 
   return (
     <header 
-      className="h-12 flex items-center justify-between px-4 border-b border-border bg-white/80 backdrop-blur-md draggable traffic-light-padding z-10"
+      className="h-12 flex items-center justify-between px-4 border-b border-border bg-white/80 backdrop-blur-md draggable traffic-light-padding z-10 transition-colors duration-200"
       role="banner"
       aria-label="Application header"
     >
       {/* Left section */}
       <div className="flex items-center gap-3 non-draggable">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-zinc-900 flex items-center justify-center shadow-sm">
+        <div className="flex items-center gap-2 group cursor-default">
+          <div className="w-6 h-6 rounded-md bg-zinc-900 flex items-center justify-center shadow-sm group-hover:bg-zinc-800 transition-colors">
             <FolderOpen className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-sm font-semibold text-foreground tracking-tight">Lecture Notes</span>
+          <span className="text-sm font-semibold text-foreground tracking-tight group-hover:text-zinc-700 transition-colors">Lecture Notes</span>
         </div>
       </div>
 

@@ -114,7 +114,7 @@ export function NotesPanel() {
     viewMode === 'original'
 
   return (
-    <div className="w-96 flex-shrink-0 panel flex flex-col overflow-hidden bg-white">
+    <div className="flex-1 flex flex-col overflow-hidden bg-white">
       {/* Header */}
       <div className="panel-header">
         <div className="flex items-center gap-2">
@@ -122,12 +122,16 @@ export function NotesPanel() {
             Notes
           </span>
           {isSaving ? (
-            <span className="text-[10px] text-muted-foreground animate-pulse">Saving...</span>
+            <span className="text-[10px] text-muted-foreground animate-pulse" aria-hidden="true">Saving...</span>
           ) : (
-            <span className="text-[10px] text-zinc-400 flex items-center gap-1">
+            <span className="text-[10px] text-zinc-400 flex items-center gap-1" aria-hidden="true">
               <Check className="w-3 h-3" /> Saved
             </span>
           )}
+          {/* Screen reader announcement for save status */}
+          <span role="status" aria-live="polite" className="sr-only">
+            {isSaving ? 'Saving notes...' : 'Notes saved'}
+          </span>
         </div>
         <span className="text-xs text-muted-foreground font-mono">
           Slide {session.currentSlideIndex + 1}
@@ -173,57 +177,63 @@ export function NotesPanel() {
         <>
           {/* Toolbar */}
           <div className="px-3 py-2 border-b border-border flex items-center gap-1 flex-wrap bg-white">
-            <ToolbarButton
-              onClick={() => editor?.chain().focus().toggleBold().run()}
-              isActive={editor?.isActive('bold')}
-              title="Bold"
-            >
-              <Bold className="w-4 h-4" />
-            </ToolbarButton>
+            <div className="flex items-center gap-0.5 p-0.5 bg-zinc-100/50 rounded-md border border-zinc-200/50">
+              <ToolbarButton
+                onClick={() => editor?.chain().focus().toggleBold().run()}
+                isActive={editor?.isActive('bold')}
+                title="Bold"
+              >
+                <Bold className="w-4 h-4" />
+              </ToolbarButton>
 
-            <ToolbarButton
-              onClick={() => editor?.chain().focus().toggleItalic().run()}
-              isActive={editor?.isActive('italic')}
-              title="Italic"
-            >
-              <Italic className="w-4 h-4" />
-            </ToolbarButton>
+              <ToolbarButton
+                onClick={() => editor?.chain().focus().toggleItalic().run()}
+                isActive={editor?.isActive('italic')}
+                title="Italic"
+              >
+                <Italic className="w-4 h-4" />
+              </ToolbarButton>
+            </div>
 
-            <div className="w-px h-4 bg-border mx-1" />
+            <div className="w-px h-4 bg-border mx-1.5" />
 
-            <ToolbarButton
-              onClick={() => editor?.chain().focus().toggleBulletList().run()}
-              isActive={editor?.isActive('bulletList')}
-              title="Bullet list"
-            >
-              <List className="w-4 h-4" />
-            </ToolbarButton>
+            <div className="flex items-center gap-0.5 p-0.5 bg-zinc-100/50 rounded-md border border-zinc-200/50">
+              <ToolbarButton
+                onClick={() => editor?.chain().focus().toggleBulletList().run()}
+                isActive={editor?.isActive('bulletList')}
+                title="Bullet list"
+              >
+                <List className="w-4 h-4" />
+              </ToolbarButton>
 
-            <ToolbarButton
-              onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-              isActive={editor?.isActive('orderedList')}
-              title="Numbered list"
-            >
-              <ListOrdered className="w-4 h-4" />
-            </ToolbarButton>
+              <ToolbarButton
+                onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+                isActive={editor?.isActive('orderedList')}
+                title="Numbered list"
+              >
+                <ListOrdered className="w-4 h-4" />
+              </ToolbarButton>
+            </div>
 
             <div className="flex-1" />
 
-            <ToolbarButton
-              onClick={() => editor?.chain().focus().undo().run()}
-              disabled={!editor?.can().undo()}
-              title="Undo"
-            >
-              <Undo className="w-4 h-4" />
-            </ToolbarButton>
+            <div className="flex items-center gap-0.5">
+              <ToolbarButton
+                onClick={() => editor?.chain().focus().undo().run()}
+                disabled={!editor?.can().undo()}
+                title="Undo"
+              >
+                <Undo className="w-4 h-4" />
+              </ToolbarButton>
 
-            <ToolbarButton
-              onClick={() => editor?.chain().focus().redo().run()}
-              disabled={!editor?.can().redo()}
-              title="Redo"
-            >
-              <Redo className="w-4 h-4" />
-            </ToolbarButton>
+              <ToolbarButton
+                onClick={() => editor?.chain().focus().redo().run()}
+                disabled={!editor?.can().redo()}
+                title="Redo"
+              >
+                <Redo className="w-4 h-4" />
+              </ToolbarButton>
+            </div>
           </div>
 
           {/* Editor */}

@@ -77,12 +77,8 @@ describe('SlideViewer', () => {
       
       render(<SlideViewer />)
       
-      // Input should show current slide number (1-indexed)
-      const input = screen.getByRole('spinbutton')
-      expect(input).toHaveValue(5)
-      
-      // Should show total
-      expect(screen.getByText('/ 10')).toBeInTheDocument()
+      // Should show slide counter (format: "5 / 10")
+      expect(screen.getByText('5 / 10')).toBeInTheDocument()
     })
   })
 
@@ -136,11 +132,9 @@ describe('SlideViewer', () => {
       
       render(<SlideViewer />)
       
-      // Click the bottom bar next button (use getAllBy and get second one which is in control bar)
-      const nextButtons = screen.getAllByRole('button', { name: /Next/i })
-      // The second button is in the controls bar (has text "Next")
-      const controlBarNextButton = nextButtons.find(btn => btn.textContent?.includes('Next'))
-      fireEvent.click(controlBarNextButton!)
+      // Click the next button (by title)
+      const nextButtons = screen.getAllByTitle(/Next slide/i)
+      fireEvent.click(nextButtons[0])
       
       expect(nextSlideSpy).toHaveBeenCalled()
     })
@@ -153,27 +147,11 @@ describe('SlideViewer', () => {
       
       render(<SlideViewer />)
       
-      // Click the bottom bar prev button
-      const prevButtons = screen.getAllByRole('button', { name: /Prev/i })
-      const controlBarPrevButton = prevButtons.find(btn => btn.textContent?.includes('Prev'))
-      fireEvent.click(controlBarPrevButton!)
+      // Click the prev button (by title)
+      const prevButtons = screen.getAllByTitle(/Previous slide/i)
+      fireEvent.click(prevButtons[0])
       
       expect(prevSlideSpy).toHaveBeenCalled()
-    })
-
-    it('should navigate via input field', () => {
-      setupSessionWithSlides(5, 0)
-      
-      const setCurrentSlideSpy = vi.fn()
-      useSessionStore.setState({ setCurrentSlide: setCurrentSlideSpy })
-      
-      render(<SlideViewer />)
-      
-      const input = screen.getByRole('spinbutton')
-      fireEvent.change(input, { target: { value: '3' } })
-      
-      // Should convert to 0-indexed
-      expect(setCurrentSlideSpy).toHaveBeenCalledWith(2)
     })
   })
 
@@ -207,14 +185,14 @@ describe('SlideViewer', () => {
   })
 
   describe('keyboard hints', () => {
-    it('should show keyboard navigation hints', () => {
+    it('should have navigation buttons with keyboard hints in title', () => {
       setupSessionWithSlides(5)
       
       render(<SlideViewer />)
       
-      expect(screen.getByText('←')).toBeInTheDocument()
-      expect(screen.getByText('→')).toBeInTheDocument()
-      expect(screen.getByText('to navigate')).toBeInTheDocument()
+      // Navigation buttons have keyboard hints in their titles
+      expect(screen.getByTitle('Previous slide (←)')).toBeInTheDocument()
+      expect(screen.getByTitle('Next slide (→)')).toBeInTheDocument()
     })
   })
 

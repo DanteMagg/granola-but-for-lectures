@@ -4,10 +4,39 @@ import * as fs from 'fs'
 import * as fsPromises from 'fs/promises'
 import * as https from 'https'
 import * as http from 'http'
+import * as crypto from 'crypto'
 import { log } from '../logger.js'
 
 // Local LLM integration bridge
 // Uses node-llama-cpp for actual inference
+
+/**
+ * Verify file integrity using SHA256 hash
+ */
+async function verifyFileHash(filePath: string, expectedHash: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256')
+    const stream = fs.createReadStream(filePath)
+    
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => {
+      const calculatedHash = hash.digest('hex')
+      const matches = calculatedHash === expectedHash
+      if (!matches) {
+        log.warn('LLM hash verification failed', { 
+          expected: expectedHash, 
+          calculated: calculatedHash,
+          filePath 
+        }, 'security')
+      }
+      resolve(matches)
+    })
+    stream.on('error', reject)
+  })
+}
+
+// Skip hash verification in development
+const SKIP_HASH_VERIFICATION = process.env.NODE_ENV !== 'production' && !app.isPackaged
 
 interface LLMConfig {
   modelPath: string
@@ -32,37 +61,43 @@ interface GenerateResponse {
   finishReason: 'stop' | 'length' | 'error'
 }
 
-// Available models with download URLs
-const LLM_MODELS: Record<string, { url: string; size: string; filename: string; contextLength: number }> = {
+// Available models with download URLs and SHA256 hashes for integrity
+// Note: SHA256 hashes should be verified from Hugging Face model cards
+const LLM_MODELS: Record<string, { url: string; size: string; filename: string; contextLength: number; sha256?: string }> = {
   'tinyllama-1.1b': {
     url: 'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
     size: '670 MB',
     filename: 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
     contextLength: 2048,
+    // sha256: 'get_from_huggingface_model_card',
   },
   'phi-2': {
     url: 'https://huggingface.co/TheBloke/phi-2-GGUF/resolve/main/phi-2.Q4_K_M.gguf',
     size: '1.6 GB',
     filename: 'phi-2.Q4_K_M.gguf',
     contextLength: 2048,
+    // sha256: 'get_from_huggingface_model_card',
   },
   'mistral-7b-instruct': {
     url: 'https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf',
     size: '4.4 GB',
     filename: 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
     contextLength: 8192,
+    // sha256: 'get_from_huggingface_model_card',
   },
   'llama-3.2-1b': {
     url: 'https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf',
     size: '775 MB',
     filename: 'Llama-3.2-1B-Instruct-Q4_K_M.gguf',
     contextLength: 8192,
+    // sha256: 'get_from_huggingface_model_card',
   },
   'llama-3.2-3b': {
     url: 'https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf',
     size: '2.0 GB',
     filename: 'Llama-3.2-3B-Instruct-Q4_K_M.gguf',
     contextLength: 8192,
+    // sha256: 'get_from_huggingface_model_card',
   },
 }
 
@@ -96,8 +131,19 @@ class LLMBridge {
       return false
     }
 
+    // Check model file size
+    const stats = fs.statSync(this.config.modelPath)
+    log.info('Model file stats', { path: this.config.modelPath, size: stats.size, sizeInMB: Math.round(stats.size / 1024 / 1024) }, 'llm')
+    
+    // TinyLlama should be ~670MB, phi-2 ~1.6GB, etc. Minimum 500MB for safety
+    if (stats.size < 500 * 1024 * 1024) {
+      log.error('Model file too small, likely incomplete download', { size: stats.size, expectedMin: 500 * 1024 * 1024 }, 'llm')
+      return false
+    }
+
     try {
       // Dynamic import of node-llama-cpp
+      log.debug('Importing node-llama-cpp module', undefined, 'llm')
       const llamaModule = await import('node-llama-cpp')
       
       if (llamaModule) {
@@ -105,16 +151,19 @@ class LLMBridge {
 
         log.debug('Initializing Llama runtime', undefined, 'llm')
         this.llama = await getLlama()
+        log.debug('Llama runtime initialized', undefined, 'llm')
 
-        log.debug('Loading model', { path: this.config.modelPath }, 'llm')
+        log.info('Loading model', { path: this.config.modelPath, size: stats.size }, 'llm')
         this.model = await this.llama.loadModel({
           modelPath: this.config.modelPath,
         })
+        log.debug('Model loaded successfully', undefined, 'llm')
 
         log.debug('Creating context', { contextLength: this.config.contextLength }, 'llm')
         this.context = await this.model.createContext({
           contextSize: this.config.contextLength,
         })
+        log.debug('Context created', undefined, 'llm')
         
         // Create a chat session
         const { LlamaChatSession } = llamaModule
@@ -122,13 +171,18 @@ class LLMBridge {
           contextSequence: this.context.getSequence(),
           systemPrompt: this.getDefaultSystemPrompt(),
         })
+        log.debug('Chat session created', undefined, 'llm')
         
         this.isLoaded = true
-        log.info('LLM initialized', { model: this.config.modelName }, 'llm')
+        log.info('LLM initialized successfully', { model: this.config.modelName }, 'llm')
         return true
       }
-    } catch (error) {
-      log.error('Failed to initialize LLM', error, 'llm')
+    } catch (error: any) {
+      log.error('Failed to initialize LLM', { 
+        message: error?.message, 
+        stack: error?.stack,
+        name: error?.name 
+      }, 'llm')
       this.isLoaded = false
     }
     
@@ -295,32 +349,76 @@ When the user provides lecture context (slides, notes, transcripts), use that in
     // Create abort controller for cancellation
     this.downloadAbortController = new AbortController()
 
-    try {
-      await this.downloadFile(modelInfo.url, destPath, onProgress)
-      
-      // Update config to use new model
-      this.config.modelPath = destPath
-      this.config.modelName = modelName
-      this.config.contextLength = modelInfo.contextLength
-      
-      // Reinitialize with new model
-      await this.unload()
-      await this.initialize()
-      
-      return { success: true }
-    } catch (error: any) {
-      if (error.name === 'AbortError' || error.message === 'Download cancelled') {
+    // Retry configuration
+    const maxRetries = 3
+    const baseDelayMs = 2000
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.downloadFile(modelInfo.url, destPath, onProgress)
+
+        // Security: Verify file hash if available
+        if (modelInfo.sha256 && !SKIP_HASH_VERIFICATION) {
+          log.info('Verifying LLM model hash', { modelName }, 'security')
+          const isValid = await verifyFileHash(destPath, modelInfo.sha256)
+          if (!isValid) {
+            await fsPromises.unlink(destPath)
+            log.error('LLM model hash verification failed', { modelName }, 'security')
+            return { success: false, error: 'Downloaded file failed integrity check. Please try again.' }
+          }
+          log.info('LLM model hash verified successfully', { modelName }, 'security')
+        }
+
+        // Update config to use new model
+        this.config.modelPath = destPath
+        this.config.modelName = modelName
+        this.config.contextLength = modelInfo.contextLength
+
+        // Reinitialize with new model
+        await this.unload()
+        await this.initialize()
+
+        return { success: true }
+      } catch (error: any) {
+        // Don't retry if user cancelled
+        if (error.name === 'AbortError' || error.message === 'Download cancelled') {
+          try {
+            await fsPromises.unlink(destPath)
+          } catch { /* ignore */ }
+          log.info('Model download cancelled', { modelName }, 'llm')
+          this.downloadAbortController = null
+          return { success: false, error: 'Download cancelled' }
+        }
+
+        // Check if we should retry
+        const isLastAttempt = attempt === maxRetries
+        const isNetworkError = error.code === 'ECONNRESET' ||
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'ENOTFOUND' ||
+          error.message?.includes('network') ||
+          error.message?.includes('socket') ||
+          error.message?.includes('Incomplete download')
+
+        if (isLastAttempt || !isNetworkError) {
+          log.error('Model download failed', { error, attempt, maxRetries }, 'llm')
+          this.downloadAbortController = null
+          return { success: false, error: error.message || 'Download failed' }
+        }
+
+        // Clean up partial download before retry
         try {
           await fsPromises.unlink(destPath)
         } catch { /* ignore */ }
-        log.info('Model download cancelled', { modelName }, 'llm')
-        return { success: false, error: 'Download cancelled' }
+
+        // Exponential backoff: 2s, 4s, 8s
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1)
+        log.info('Download failed, retrying', { attempt, maxRetries, delayMs, error: error.message }, 'llm')
+        await new Promise(resolve => setTimeout(resolve, delayMs))
       }
-      log.error('Model download failed', error, 'llm')
-      return { success: false, error: error.message || 'Download failed' }
-    } finally {
-      this.downloadAbortController = null
     }
+
+    this.downloadAbortController = null
+    return { success: false, error: 'Download failed after retries' }
   }
 
   cancelDownload(): void {
@@ -332,16 +430,29 @@ When the user provides lecture context (slides, notes, transcripts), use that in
   private downloadFile(
     url: string,
     destPath: string,
-    onProgress?: (downloaded: number, total: number) => void
+    onProgress?: (downloaded: number, total: number) => void,
+    redirectCount: number = 0
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (redirectCount > 10) {
+        reject(new Error('Too many redirects'))
+        return
+      }
+
+      log.info('Starting download', { url: url.substring(0, 80) + '...', redirectCount }, 'llm')
+
       const handleResponse = (response: http.IncomingMessage) => {
+        log.debug('Download response', { 
+          statusCode: response.statusCode, 
+          headers: { contentLength: response.headers['content-length'], location: response.headers.location?.substring(0, 100) }
+        }, 'llm')
+
         // Handle redirects
         if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 307) {
           const redirectUrl = response.headers.location
           if (redirectUrl) {
-            log.debug('Following redirect', { redirectUrl }, 'llm')
-            this.downloadFile(redirectUrl, destPath, onProgress)
+            log.info('Following redirect', { redirectUrl: redirectUrl.substring(0, 100) + '...' }, 'llm')
+            this.downloadFile(redirectUrl, destPath, onProgress, redirectCount + 1)
               .then(resolve)
               .catch(reject)
             return
@@ -356,6 +467,8 @@ When the user provides lecture context (slides, notes, transcripts), use that in
         const totalSize = parseInt(response.headers['content-length'] || '0', 10)
         let downloadedSize = 0
 
+        log.info('Download started', { totalSize, destPath }, 'llm')
+
         const writeStream = fs.createWriteStream(destPath)
         
         response.on('data', (chunk: Buffer) => {
@@ -369,10 +482,27 @@ When the user provides lecture context (slides, notes, transcripts), use that in
 
         writeStream.on('finish', () => {
           writeStream.close()
+          log.info('Download complete', { downloadedSize, totalSize, destPath }, 'llm')
+          
+          // Verify file size
+          if (totalSize > 0 && downloadedSize < totalSize * 0.99) {
+            fs.unlink(destPath, () => {})
+            reject(new Error(`Incomplete download: got ${downloadedSize} of ${totalSize} bytes`))
+            return
+          }
+          
           resolve()
         })
 
         writeStream.on('error', (err) => {
+          log.error('Write stream error', err, 'llm')
+          fs.unlink(destPath, () => {})
+          reject(err)
+        })
+
+        response.on('error', (err) => {
+          log.error('Response stream error', err, 'llm')
+          writeStream.close()
           fs.unlink(destPath, () => {})
           reject(err)
         })
@@ -390,7 +520,10 @@ When the user provides lecture context (slides, notes, transcripts), use that in
       const protocol = url.startsWith('https') ? https : http
       const request = protocol.get(url, handleResponse)
       
-      request.on('error', reject)
+      request.on('error', (err) => {
+        log.error('Request error', err, 'llm')
+        reject(err)
+      })
     })
   }
 

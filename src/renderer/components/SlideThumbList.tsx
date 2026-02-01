@@ -100,7 +100,7 @@ export function SlideThumbList() {
 
   return (
     <nav
-      className="w-44 flex-shrink-0 panel flex flex-col overflow-hidden bg-white"
+      className="w-32 flex-shrink-0 flex flex-col overflow-hidden bg-zinc-50/50 border-r border-border"
       role="tablist"
       aria-label="Slide navigation"
     >

@@ -1,10 +1,18 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
+import { toast } from '../stores/toastStore'
 import { Mic, MicOff, Pause, Play, Square, AlertTriangle, Loader2, MessageSquare, MessageSquareOff } from 'lucide-react'
 import { clsx } from 'clsx'
 import { AUDIO_CONFIG, TRANSCRIPTION_CONFIG } from '@shared/constants'
 import { RECORDING_TOGGLE_EVENT } from '../App'
 import { useAccessibility } from '../hooks/useAccessibility'
+
+// Maximum number of audio chunks to queue for transcription
+// Prevents memory growth during long recordings or slow transcription
+const MAX_TRANSCRIPTION_QUEUE_SIZE = 10
+
+// Number of consecutive failures before showing user warning
+const TRANSCRIPTION_FAILURE_THRESHOLD = 3
 
 interface WhisperStatus {
   loaded: boolean
@@ -36,7 +44,9 @@ export function AudioRecorder() {
   const streamRef = useRef<MediaStream | null>(null)
   const isTranscribingRef = useRef(false)
   const transcriptionQueueRef = useRef<Blob[]>([])
-  
+  const transcriptionFailureCountRef = useRef(0)
+  const hasShownTranscriptionWarningRef = useRef(false)
+
   // Ref to track if we should toggle (to avoid stale closure issues)
   const isRecordingRef = useRef(false)
   const autoDeleteAudioRef = useRef(autoDeleteAudio)
@@ -118,8 +128,19 @@ export function AudioRecorder() {
       return
     }
 
-    // Prevent concurrent transcriptions
+    // Prevent concurrent transcriptions - queue if busy
     if (isTranscribingRef.current) {
+      // Limit queue size to prevent memory growth
+      if (transcriptionQueueRef.current.length >= MAX_TRANSCRIPTION_QUEUE_SIZE) {
+        console.warn('Transcription queue full, dropping oldest chunk')
+        transcriptionQueueRef.current.shift() // Remove oldest
+        setPendingChunks(prev => Math.max(0, prev - 1))
+        // Show warning once per recording session about queue overflow
+        if (!hasShownTranscriptionWarningRef.current) {
+          toast.warning('Transcription Busy', 'Some audio may not be transcribed. Consider pausing recording.')
+          hasShownTranscriptionWarningRef.current = true
+        }
+      }
       transcriptionQueueRef.current.push(audioBlob)
       setPendingChunks(prev => prev + 1)
       return
@@ -173,9 +194,21 @@ export function AudioRecorder() {
           }
         }
       }
+      // Reset failure counter on successful transcription
+      transcriptionFailureCountRef.current = 0
     } catch (err) {
       console.error('Transcription error:', err)
-      // Don't set error state - just log it to avoid disrupting recording
+      // Track consecutive failures
+      transcriptionFailureCountRef.current++
+
+      // Show warning after multiple consecutive failures (not every time to avoid spam)
+      if (transcriptionFailureCountRef.current === TRANSCRIPTION_FAILURE_THRESHOLD && !hasShownTranscriptionWarningRef.current) {
+        toast.warning(
+          'Transcription Issues',
+          'Having trouble transcribing audio. Check Settings for model status.'
+        )
+        hasShownTranscriptionWarningRef.current = true
+      }
     } finally {
       isTranscribingRef.current = false
       setIsTranscribing(false)
@@ -192,7 +225,11 @@ export function AudioRecorder() {
   const startRecording = async () => {
     try {
       setError(null)
-      
+
+      // Reset transcription tracking for new recording
+      transcriptionFailureCountRef.current = 0
+      hasShownTranscriptionWarningRef.current = false
+
       // Check Whisper status first
       await checkWhisperStatus()
       
@@ -422,7 +459,7 @@ export function AudioRecorder() {
   const showWhisperWarning = !whisperStatus?.loaded && !whisperStatus?.exists
 
   return (
-    <div className="mt-3 flex items-center justify-center gap-4 bg-white/50 backdrop-blur-sm p-2 rounded-full border border-zinc-200/50 shadow-sm inline-flex mx-auto relative">
+    <div className="mt-3 flex items-center justify-center gap-4 bg-white/80 backdrop-blur-md p-2 rounded-full border border-white/20 shadow-lg ring-1 ring-black/5 inline-flex mx-auto relative transition-all duration-300 hover:shadow-xl hover:scale-[1.01]">
       {/* Whisper not loaded warning */}
       {showWhisperWarning && !session.isRecording && (
         <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-amber-50 text-amber-700 text-xs px-3 py-2 rounded-md flex items-center gap-2 border border-amber-200 shadow-sm whitespace-nowrap">
@@ -459,16 +496,28 @@ export function AudioRecorder() {
       {session.isRecording && (isTranscribing || pendingChunks > 0) && (
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Loader2 className="w-3 h-3 animate-spin" />
-          <span className="sr-only">Transcribing</span>
         </div>
       )}
+
+      {/* Screen reader announcements for transcription status */}
+      <div 
+        role="status" 
+        aria-live="polite" 
+        aria-atomic="true" 
+        className="sr-only"
+      >
+        {session.isRecording && isTranscribing && 'Transcribing audio...'}
+        {session.isRecording && !isTranscribing && pendingChunks > 0 && `${pendingChunks} audio chunks pending transcription`}
+      </div>
 
       {/* Main record button */}
       <button
         onClick={session.isRecording ? stopRecording : startRecording}
         className={clsx(
-          'btn-record p-3 transition-all duration-300',
-          session.isRecording && 'recording bg-red-500 hover:bg-red-600'
+          'btn-record p-3 transition-all duration-300 transform',
+          session.isRecording 
+            ? 'recording bg-red-500 hover:bg-red-600 scale-110' 
+            : 'hover:scale-105 active:scale-95'
         )}
         title={session.isRecording ? 'Stop recording' : 'Start recording (R)'}
       >
@@ -552,57 +601,5 @@ export function AudioRecorder() {
   )
 }
 
-// Helper function to transcribe existing audio files
-export async function transcribeAudioFile(
-  audioBase64: string,
-  slideId: string,
-  addTranscriptSegment: (slideId: string, segment: { text: string; startTime: number; endTime: number; confidence: number }) => void
-): Promise<{ success: boolean; error?: string }> {
-  if (!window.electronAPI?.whisperTranscribe) {
-    return { success: false, error: 'Whisper API not available' }
-  }
-
-  try {
-    // Check if Whisper is loaded
-    const info = await window.electronAPI.whisperGetInfo()
-    if (!info.loaded) {
-      return { success: false, error: 'Whisper model not loaded. Please load a model in Settings.' }
-    }
-
-    const result = await window.electronAPI.whisperTranscribe(audioBase64)
-    
-    if (result && result.segments && result.segments.length > 0) {
-      for (const segment of result.segments) {
-        if (!segment.text || !segment.text.trim()) continue
-        if (segment.confidence < TRANSCRIPTION_CONFIG.CONFIDENCE_THRESHOLD) continue
-        
-        const text = segment.text.trim()
-        if (text.startsWith('[') && text.endsWith(']')) continue
-
-        addTranscriptSegment(slideId, {
-          text,
-          startTime: segment.start,
-          endTime: segment.end,
-          confidence: segment.confidence,
-        })
-      }
-      return { success: true }
-    } else if (result && result.text && result.text.trim()) {
-      const text = result.text.trim()
-      if (!text.startsWith('[') || !text.endsWith(']')) {
-        addTranscriptSegment(slideId, {
-          text,
-          startTime: 0,
-          endTime: 5000,
-          confidence: 0.8,
-        })
-      }
-      return { success: true }
-    }
-
-    return { success: false, error: 'No transcription results' }
-  } catch (err) {
-    console.error('Transcription error:', err)
-    return { success: false, error: err instanceof Error ? err.message : 'Transcription failed' }
-  }
-}
+// Note: transcribeAudioFile has been moved to src/renderer/lib/transcription.ts
+// to enable React Fast Refresh for this component

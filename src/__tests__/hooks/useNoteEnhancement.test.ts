@@ -5,12 +5,22 @@ import { useSessionStore } from '../../renderer/stores/sessionStore'
 import { createMockSession, createMockSlide, createMockNote } from '../helpers/mockData'
 import type { TranscriptSegment } from '@shared/types'
 
-// Mock the store
-vi.mock('../../renderer/stores/sessionStore')
-
 // Mock uuid
 vi.mock('uuid', () => ({
   v4: () => 'mock-uuid-1234',
+}))
+
+// Store mock data that will be returned by both hook and getState
+let mockStoreData: any = null
+
+// Mock the store - need to mock both the hook and getState()
+vi.mock('../../renderer/stores/sessionStore', () => ({
+  useSessionStore: Object.assign(
+    vi.fn(() => mockStoreData),
+    {
+      getState: vi.fn(() => mockStoreData),
+    }
+  ),
 }))
 
 const mockUseSessionStore = vi.mocked(useSessionStore)
@@ -34,7 +44,8 @@ describe('useNoteEnhancement', () => {
       ],
     }
 
-    mockUseSessionStore.mockReturnValue({
+    // Set up mock data that will be returned by both hook and getState()
+    mockStoreData = {
       session: createMockSession({
         slides,
         notes: {
@@ -46,7 +57,11 @@ describe('useNoteEnhancement', () => {
       setEnhancedNote: mockSetEnhancedNote,
       updateEnhancedNoteStatus: mockUpdateEnhancedNoteStatus,
       setSessionPhase: mockSetSessionPhase,
-    } as any)
+    }
+
+    // Update the mock to return our data
+    mockUseSessionStore.mockReturnValue(mockStoreData)
+    ;(useSessionStore as any).getState = vi.fn(() => mockStoreData)
 
     // Mock window.electronAPI
     window.electronAPI = {

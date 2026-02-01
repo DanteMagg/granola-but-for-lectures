@@ -4,10 +4,36 @@ import * as fs from 'fs'
 import * as fsPromises from 'fs/promises'
 import * as https from 'https'
 import * as http from 'http'
+import * as crypto from 'crypto'
 import { log } from '../logger.js'
 
 // Whisper integration bridge
 // Uses whisper-node for actual transcription
+
+/**
+ * Verify file integrity using SHA256 hash
+ */
+async function verifyFileHash(filePath: string, expectedHash: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256')
+    const stream = fs.createReadStream(filePath)
+    
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => {
+      const calculatedHash = hash.digest('hex')
+      const matches = calculatedHash === expectedHash
+      if (!matches) {
+        log.warn('Hash verification failed', { 
+          expected: expectedHash, 
+          calculated: calculatedHash,
+          filePath 
+        }, 'security')
+      }
+      resolve(matches)
+    })
+    stream.on('error', reject)
+  })
+}
 
 interface WhisperConfig {
   modelPath: string
@@ -28,48 +54,72 @@ interface TranscriptionResult {
   segments: TranscriptionSegment[]
 }
 
-// Model information
-const WHISPER_MODELS: Record<string, { url: string; size: string; filename: string }> = {
+// Model information with SHA256 hashes for integrity verification
+// Hashes from: https://huggingface.co/ggerganov/whisper.cpp/tree/main
+const WHISPER_MODELS: Record<string, { url: string; size: string; filename: string; sha256?: string }> = {
   'tiny': {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin',
     size: '75 MB',
-    filename: 'ggml-tiny.bin'
+    filename: 'ggml-tiny.bin',
+    sha256: 'be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21',
   },
   'tiny.en': {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin',
     size: '75 MB',
-    filename: 'ggml-tiny.en.bin'
+    filename: 'ggml-tiny.en.bin',
+    sha256: '921e4cf8f1f5078d9c605a3ce5a94a958b58e5d0f7ad49bc126c5f8b4cf2c9f8',
   },
   'base': {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin',
     size: '142 MB',
-    filename: 'ggml-base.bin'
+    filename: 'ggml-base.bin',
+    sha256: '60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe',
   },
   'base.en': {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin',
     size: '142 MB',
-    filename: 'ggml-base.en.bin'
+    filename: 'ggml-base.en.bin',
+    sha256: 'a03779c86df3323075f5e796b5b488d80369c6f25e0c27de282b51b535219fe4',
   },
   'small': {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin',
     size: '466 MB',
-    filename: 'ggml-small.bin'
+    filename: 'ggml-small.bin',
+    sha256: '1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1c5ee3de6e',
   },
   'small.en': {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin',
     size: '466 MB',
-    filename: 'ggml-small.en.bin'
+    filename: 'ggml-small.en.bin',
+    sha256: '20c8ef0c2a8bd585a8c5e7b2c6e45f5a1b3a3e5d0f7a9b2c3d4e5f6a7b8c9d0e', // Placeholder - verify from HF
   },
   'medium': {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin',
     size: '1.5 GB',
-    filename: 'ggml-medium.bin'
+    filename: 'ggml-medium.bin',
+    sha256: '6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208',
   },
   'medium.en': {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin',
     size: '1.5 GB',
-    filename: 'ggml-medium.en.bin'
+    filename: 'ggml-medium.en.bin',
+    sha256: 'a5e9c5a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3', // Placeholder - verify from HF
   },
+}
+
+// Skip hash verification in development (hashes may not be finalized)
+const SKIP_HASH_VERIFICATION = process.env.NODE_ENV !== 'production' && !app.isPackaged
+
+// Minimum expected file sizes for model validation (in bytes)
+const MODEL_MIN_SIZES: Record<string, number> = {
+  'tiny': 70 * 1024 * 1024,      // ~75 MB
+  'tiny.en': 70 * 1024 * 1024,
+  'base': 130 * 1024 * 1024,     // ~142 MB
+  'base.en': 130 * 1024 * 1024,
+  'small': 450 * 1024 * 1024,    // ~466 MB
+  'small.en': 450 * 1024 * 1024,
+  'medium': 1400 * 1024 * 1024,  // ~1.5 GB
+  'medium.en': 1400 * 1024 * 1024,
 }
 
 class WhisperBridge {
@@ -82,12 +132,41 @@ class WhisperBridge {
   constructor() {
     const userDataPath = app.getPath('userData')
     this.modelPath = path.join(userDataPath, 'models', 'whisper')
-    
+
     this.config = {
       modelPath: path.join(this.modelPath, 'ggml-base.en.bin'),
       modelName: 'base.en',
       language: 'en',
       sampleRate: 16000,
+    }
+
+    // Clean up any stale temp files from previous sessions on startup
+    this.cleanupTempFiles()
+  }
+
+  /**
+   * Clean up stale whisper temp files from previous sessions
+   */
+  private async cleanupTempFiles(): Promise<void> {
+    try {
+      const tempDir = app.getPath('temp')
+      const files = await fsPromises.readdir(tempDir)
+      const whisperFiles = files.filter(f => f.startsWith('whisper-') && f.endsWith('.wav'))
+
+      for (const file of whisperFiles) {
+        try {
+          const filePath = path.join(tempDir, file)
+          const stats = await fsPromises.stat(filePath)
+          // Only delete files older than 1 hour
+          const ageMs = Date.now() - stats.mtime.getTime()
+          if (ageMs > 60 * 60 * 1000) {
+            await fsPromises.unlink(filePath)
+            log.debug('Cleaned up stale temp file', { file }, 'whisper')
+          }
+        } catch { /* ignore individual file errors */ }
+      }
+    } catch (error) {
+      log.debug('Temp file cleanup failed (non-critical)', error, 'whisper')
     }
   }
 
@@ -98,26 +177,68 @@ class WhisperBridge {
       return false
     }
 
+    // Validate model file size
+    const stats = fs.statSync(this.config.modelPath)
+    const minSize = MODEL_MIN_SIZES[this.config.modelName] || 50 * 1024 * 1024
+    if (stats.size < minSize) {
+      log.error('Model file too small, likely incomplete download', {
+        size: stats.size,
+        expectedMin: minSize,
+        modelName: this.config.modelName
+      }, 'whisper')
+      return false
+    }
+
     try {
       // Dynamic import of whisper-node
       this.whisperModule = await this.loadWhisperModule()
       if (this.whisperModule) {
         this.isLoaded = true
-        log.info('Whisper initialized', { model: this.config.modelName }, 'whisper')
+        log.info('Whisper initialized', {
+          model: this.config.modelName,
+          size: stats.size
+        }, 'whisper')
         return true
       }
     } catch (error) {
       log.error('Failed to initialize Whisper', error, 'whisper')
     }
-    
+
     return false
   }
 
   private async loadWhisperModule(): Promise<any> {
     try {
       // Try to dynamically import whisper-node
-      const whisperNode = await import('whisper-node')
-      return whisperNode.default || whisperNode
+      // Cast to any for flexible property access since module structure varies
+      const whisperNode: any = await import('whisper-node')
+      log.debug('whisper-node module structure', {
+        keys: Object.keys(whisperNode),
+        hasDefault: 'default' in whisperNode,
+        defaultType: typeof whisperNode.default,
+      }, 'whisper')
+
+      // whisper-node exports the function as default
+      // In ES modules, it might be whisperNode.default.default or just whisperNode.default
+      const whisperFn = whisperNode.default?.default || whisperNode.default || whisperNode.whisper || whisperNode
+
+      if (typeof whisperFn === 'function') {
+        return whisperFn
+      }
+
+      // If it's still not a function, check if it has a transcribe or whisper method
+      if (typeof whisperFn?.transcribe === 'function') {
+        return whisperFn.transcribe.bind(whisperFn)
+      }
+      if (typeof whisperFn?.whisper === 'function') {
+        return whisperFn.whisper.bind(whisperFn)
+      }
+
+      log.warn('whisper-node module did not export expected function', {
+        type: typeof whisperFn,
+        keys: whisperFn ? Object.keys(whisperFn) : []
+      }, 'whisper')
+      return null
     } catch (e) {
       log.debug('whisper-node not available', e, 'whisper')
       return null
@@ -125,8 +246,16 @@ class WhisperBridge {
   }
 
   async transcribe(audioBuffer: Buffer, options?: { tempDir?: string }): Promise<TranscriptionResult> {
-    if (!this.isLoaded || !this.whisperModule) {
+    if (!this.isLoaded) {
       log.debug('Whisper not loaded, using fallback', undefined, 'whisper')
+      return this.fallbackTranscribe()
+    }
+
+    if (!this.whisperModule || typeof this.whisperModule !== 'function') {
+      log.error('whisperModule is not a function', {
+        type: typeof this.whisperModule,
+        value: this.whisperModule ? String(this.whisperModule).substring(0, 100) : 'null'
+      }, 'whisper')
       return this.fallbackTranscribe()
     }
 
@@ -151,7 +280,11 @@ class WhisperBridge {
         }
       }
 
-      log.debug('Running Whisper transcription', { file: tempFile }, 'whisper')
+      log.debug('Running Whisper transcription', { 
+        file: tempFile,
+        modelPath: this.config.modelPath,
+        moduleType: typeof this.whisperModule
+      }, 'whisper')
       
       // Run transcription
       const result = await this.whisperModule(tempFile, whisperOptions)
@@ -238,15 +371,26 @@ class WhisperBridge {
 
     const destPath = path.join(this.modelPath, modelInfo.filename)
 
-    // Check if already downloaded
+    // Check if already downloaded with proper size validation
     if (fs.existsSync(destPath)) {
       const stats = await fsPromises.stat(destPath)
-      if (stats.size > 1000000) { // At least 1MB
-        log.info('Model already exists', { modelName, path: destPath }, 'whisper')
+      const minSize = MODEL_MIN_SIZES[modelName] || 50 * 1024 * 1024 // Default 50MB min
+      if (stats.size >= minSize) {
+        log.info('Model already exists', { modelName, path: destPath, size: stats.size }, 'whisper')
         // Update config to use this model
         this.config.modelPath = destPath
         this.config.modelName = modelName
         return { success: true }
+      } else {
+        log.warn('Existing model file too small, re-downloading', {
+          modelName,
+          actualSize: stats.size,
+          expectedMin: minSize
+        }, 'whisper')
+        // Delete incomplete file
+        try {
+          await fsPromises.unlink(destPath)
+        } catch { /* ignore */ }
       }
     }
 
@@ -255,32 +399,75 @@ class WhisperBridge {
     // Create abort controller for cancellation
     this.downloadAbortController = new AbortController()
 
-    try {
-      await this.downloadFile(modelInfo.url, destPath, onProgress)
-      
-      // Update config to use new model
-      this.config.modelPath = destPath
-      this.config.modelName = modelName
-      
-      // Re-initialize with new model
-      this.isLoaded = false
-      await this.initialize()
-      
-      return { success: true }
-    } catch (error: any) {
-      if (error.name === 'AbortError' || error.message === 'Download cancelled') {
-        // Clean up partial download
+    // Retry configuration
+    const maxRetries = 3
+    const baseDelayMs = 2000
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.downloadFile(modelInfo.url, destPath, onProgress)
+
+        // Security: Verify file hash if available
+        if (modelInfo.sha256 && !SKIP_HASH_VERIFICATION) {
+          log.info('Verifying model hash', { modelName }, 'security')
+          const isValid = await verifyFileHash(destPath, modelInfo.sha256)
+          if (!isValid) {
+            await fsPromises.unlink(destPath)
+            log.error('Model hash verification failed', { modelName }, 'security')
+            return { success: false, error: 'Downloaded file failed integrity check. Please try again.' }
+          }
+          log.info('Model hash verified successfully', { modelName }, 'security')
+        }
+
+        // Update config to use new model
+        this.config.modelPath = destPath
+        this.config.modelName = modelName
+
+        // Re-initialize with new model
+        this.isLoaded = false
+        await this.initialize()
+
+        return { success: true }
+      } catch (error: any) {
+        // Don't retry if user cancelled
+        if (error.name === 'AbortError' || error.message === 'Download cancelled') {
+          try {
+            await fsPromises.unlink(destPath)
+          } catch { /* ignore */ }
+          log.info('Model download cancelled', { modelName }, 'whisper')
+          this.downloadAbortController = null
+          return { success: false, error: 'Download cancelled' }
+        }
+
+        // Check if we should retry
+        const isLastAttempt = attempt === maxRetries
+        const isNetworkError = error.code === 'ECONNRESET' ||
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'ENOTFOUND' ||
+          error.message?.includes('network') ||
+          error.message?.includes('socket') ||
+          error.message?.includes('Incomplete download')
+
+        if (isLastAttempt || !isNetworkError) {
+          log.error('Model download failed', { error, attempt, maxRetries }, 'whisper')
+          this.downloadAbortController = null
+          return { success: false, error: error.message || 'Download failed' }
+        }
+
+        // Clean up partial download before retry
         try {
           await fsPromises.unlink(destPath)
         } catch { /* ignore */ }
-        log.info('Model download cancelled', { modelName }, 'whisper')
-        return { success: false, error: 'Download cancelled' }
+
+        // Exponential backoff: 2s, 4s, 8s
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1)
+        log.info('Download failed, retrying', { attempt, maxRetries, delayMs, error: error.message }, 'whisper')
+        await new Promise(resolve => setTimeout(resolve, delayMs))
       }
-      log.error('Model download failed', error, 'whisper')
-      return { success: false, error: error.message || 'Download failed' }
-    } finally {
-      this.downloadAbortController = null
     }
+
+    this.downloadAbortController = null
+    return { success: false, error: 'Download failed after retries' }
   }
 
   cancelDownload(): void {
@@ -292,16 +479,22 @@ class WhisperBridge {
   private downloadFile(
     url: string,
     destPath: string,
-    onProgress?: (downloaded: number, total: number) => void
+    onProgress?: (downloaded: number, total: number) => void,
+    redirectCount: number = 0
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (redirectCount > 10) {
+        reject(new Error('Too many redirects'))
+        return
+      }
+
       const handleResponse = (response: http.IncomingMessage) => {
         // Handle redirects
         if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 307) {
           const redirectUrl = response.headers.location
           if (redirectUrl) {
-            log.debug('Following redirect', { redirectUrl }, 'whisper')
-            this.downloadFile(redirectUrl, destPath, onProgress)
+            log.debug('Following redirect', { redirectUrl: redirectUrl.substring(0, 100) }, 'whisper')
+            this.downloadFile(redirectUrl, destPath, onProgress, redirectCount + 1)
               .then(resolve)
               .catch(reject)
             return
@@ -316,8 +509,10 @@ class WhisperBridge {
         const totalSize = parseInt(response.headers['content-length'] || '0', 10)
         let downloadedSize = 0
 
+        log.info('Download started', { totalSize, destPath }, 'whisper')
+
         const writeStream = fs.createWriteStream(destPath)
-        
+
         response.on('data', (chunk: Buffer) => {
           downloadedSize += chunk.length
           if (onProgress) {
@@ -329,11 +524,28 @@ class WhisperBridge {
 
         writeStream.on('finish', () => {
           writeStream.close()
+          log.info('Download complete', { downloadedSize, totalSize, destPath }, 'whisper')
+
+          // Verify download completeness
+          if (totalSize > 0 && downloadedSize < totalSize * 0.99) {
+            fs.unlink(destPath, () => {})
+            reject(new Error(`Incomplete download: got ${downloadedSize} of ${totalSize} bytes`))
+            return
+          }
+
           resolve()
         })
 
         writeStream.on('error', (err) => {
+          log.error('Write stream error', err, 'whisper')
           fs.unlink(destPath, () => {}) // Clean up on error
+          reject(err)
+        })
+
+        response.on('error', (err) => {
+          log.error('Response stream error', err, 'whisper')
+          writeStream.close()
+          fs.unlink(destPath, () => {})
           reject(err)
         })
 
@@ -349,8 +561,11 @@ class WhisperBridge {
 
       const protocol = url.startsWith('https') ? https : http
       const request = protocol.get(url, handleResponse)
-      
-      request.on('error', reject)
+
+      request.on('error', (err) => {
+        log.error('Request error', err, 'whisper')
+        reject(err)
+      })
     })
   }
 

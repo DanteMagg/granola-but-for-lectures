@@ -35,6 +35,7 @@ export default function App() {
     saveSession,
     isSaving,
     setFeedback,
+    createSession,
   } = useSessionStore()
   
   const [isReady, setIsReady] = useState(false)
@@ -144,6 +145,28 @@ export default function App() {
         return
       }
 
+      // Meta+, - Settings
+      if (isMod && e.key === ',') {
+        e.preventDefault()
+        setUIState({ showSettingsModal: true })
+        return
+      }
+
+      // Meta+N - New session
+      if (isMod && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        createSession()
+        toast.shortcut('New Session', '⌘N')
+        return
+      }
+
+      // Meta+\ - Toggle sidebar
+      if (isMod && e.key === '\\') {
+        e.preventDefault()
+        setUIState({ sidebarCollapsed: !ui.sidebarCollapsed })
+        return
+      }
+
       // Don't process other shortcuts if modifiers are pressed
       if (isMod) return
 
@@ -178,8 +201,26 @@ export default function App() {
           }
           break
 
+        case SHORTCUTS.FOCUS_NOTES:
+        case SHORTCUTS.FOCUS_NOTES.toUpperCase():
+          if (session) {
+            const notesEditor = document.querySelector('.ProseMirror') as HTMLElement
+            if (notesEditor) {
+              notesEditor.focus()
+              toast.shortcut('Focus Notes', 'N')
+            }
+          }
+          break
+
         case '?':
           setUIState({ showShortcutsHelp: true })
+          break
+        
+        // Also handle Shift+/ for keyboards where ? doesn't register
+        case '/':
+          if (e.shiftKey) {
+            setUIState({ showShortcutsHelp: true })
+          }
           break
       }
     }
@@ -197,6 +238,7 @@ export default function App() {
     importPdf,
     isImporting,
     isTyping,
+    createSession,
   ])
 
   if (!isReady) {
@@ -235,48 +277,48 @@ export default function App() {
             <ErrorBoundary>
               {session && session.slides.length > 0 ? (
                 <>
-                  {/* Top section: Slides + Notes */}
-                  <div className="flex-1 flex overflow-hidden p-4 gap-4">
-                    {/* Slide thumbnails */}
-                    <SlideThumbList />
+                  {/* Main content area - slide-focused layout */}
+                  <div className="flex-1 flex overflow-hidden">
+                    {/* Left: Slide thumbnails - collapsible narrow strip */}
+                    {ui.showSlideList && (
+                      <div className="flex-shrink-0">
+                        <SlideThumbList />
+                      </div>
+                    )}
 
-                    {/* Current slide viewer */}
-                    <div className="flex-1 flex flex-col min-w-0">
+                    {/* Center: Slide viewer - DOMINANT */}
+                    <div className="flex-1 flex flex-col min-w-0 p-3">
                       <ErrorBoundary section="slides">
                         <SlideViewer />
                       </ErrorBoundary>
                       
-                      {/* Recording controls */}
-                      <AudioRecorder />
+                      {/* Recording controls - compact below slide */}
+                      <div className="mt-2">
+                        <AudioRecorder />
+                      </div>
+                      
+                      {/* Enhance CTA - inline compact version */}
+                      {!session.isRecording && (session.phase === 'ready_to_enhance' || session.phase === 'enhancing') && (
+                        <div className="mt-2">
+                          <EnhanceNotesButton variant="compact" className="justify-center" />
+                        </div>
+                      )}
                     </div>
 
-                    {/* Notes panel with error boundary */}
-                    <ErrorBoundary section="notes">
-                      <NotesPanel />
-                    </ErrorBoundary>
+                    {/* Right: Notes + Transcript in a single panel */}
+                    <div className="w-80 flex-shrink-0 flex flex-col border-l border-border bg-white">
+                      <ErrorBoundary section="notes">
+                        <NotesPanel />
+                      </ErrorBoundary>
+                      
+                      {/* Transcript at bottom of right panel */}
+                      {(!session.isRecording || ui.showLiveTranscript) && (
+                        <ErrorBoundary section="transcript" compact>
+                          <TranscriptPanel />
+                        </ErrorBoundary>
+                      )}
+                    </div>
                   </div>
-
-                  {/* Enhance Notes CTA - shown after recording stops */}
-                  {!session.isRecording && session.phase === 'ready_to_enhance' && (
-                    <div className="px-4 pb-4">
-                      <EnhanceNotesButton />
-                    </div>
-                  )}
-
-                  {/* Enhancement progress - shown during enhancement */}
-                  {session.phase === 'enhancing' && (
-                    <div className="px-4 pb-4">
-                      <EnhanceNotesButton />
-                    </div>
-                  )}
-
-                  {/* Bottom section: Transcript - hidden during recording unless toggled */}
-                  {/* Granola-style: clean UI during recording, show transcript after or if toggled */}
-                  {(!session.isRecording || ui.showLiveTranscript) && (
-                    <ErrorBoundary section="transcript" compact>
-                      <TranscriptPanel />
-                    </ErrorBoundary>
-                  )}
                 </>
               ) : (
                 <EmptyState />

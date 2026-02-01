@@ -43,28 +43,28 @@ export function Sidebar() {
 
   if (ui.sidebarCollapsed) {
     return (
-      <aside className="w-12 bg-zinc-50/50 border-r border-border flex flex-col backdrop-blur-sm">
+      <aside className="w-12 bg-zinc-50/50 border-r border-border flex flex-col backdrop-blur-sm transition-all duration-300 ease-in-out">
         <button
           onClick={() => setUIState({ sidebarCollapsed: false })}
-          className="p-3 hover:bg-zinc-100 transition-colors"
+          className="p-3 hover:bg-zinc-100 transition-colors group"
           title="Expand sidebar"
         >
-          <ChevronRight className="w-5 h-5 text-muted-foreground" />
+          <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
         </button>
         
         <button
           onClick={handleNewSession}
-          className="p-3 hover:bg-zinc-100 transition-colors"
+          className="p-3 hover:bg-zinc-100 transition-colors group"
           title="New session"
         >
-          <Plus className="w-5 h-5 text-muted-foreground" />
+          <Plus className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
         </button>
       </aside>
     )
   }
 
   return (
-    <aside className="w-64 bg-zinc-50/30 border-r border-border flex flex-col backdrop-blur-sm">
+    <aside className="w-64 bg-zinc-50/30 border-r border-border flex flex-col backdrop-blur-sm transition-all duration-300 ease-in-out">
       {/* Header */}
       <div className="p-3 flex items-center justify-between border-b border-border/50">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider pl-2">
@@ -73,17 +73,17 @@ export function Sidebar() {
         <div className="flex items-center gap-1">
           <button
             onClick={handleNewSession}
-            className="p-1.5 hover:bg-zinc-100 rounded-md transition-colors"
+            className="p-1.5 hover:bg-zinc-100 rounded-md transition-colors group"
             title="New session"
           >
-            <Plus className="w-4 h-4 text-muted-foreground" />
+            <Plus className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
           </button>
           <button
             onClick={() => setUIState({ sidebarCollapsed: true })}
-            className="p-1.5 hover:bg-zinc-100 rounded-md transition-colors"
+            className="p-1.5 hover:bg-zinc-100 rounded-md transition-colors group"
             title="Collapse sidebar"
           >
-            <ChevronLeft className="w-4 h-4 text-muted-foreground" />
+            <ChevronLeft className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
           </button>
         </div>
       </div>
@@ -106,32 +106,43 @@ export function Sidebar() {
         ) : (
           <div className="space-y-0.5">
             {sessionList.map((item) => (
-              <button
+              <div
                 key={item.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => loadSession(item.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    loadSession(item.id)
+                  }
+                }}
                 className={clsx(
-                  'w-full text-left p-2.5 rounded-md transition-all duration-200 group border border-transparent',
+                  'w-full text-left p-2.5 rounded-md transition-all duration-200 group border border-transparent cursor-pointer relative',
                   session?.id === item.id
-                    ? 'bg-white shadow-sm border-border text-foreground'
-                    : 'hover:bg-zinc-100 text-muted-foreground hover:text-foreground'
+                    ? 'bg-white shadow-sm border-border text-foreground ring-1 ring-black/5'
+                    : 'hover:bg-zinc-100/80 text-muted-foreground hover:text-foreground hover:translate-x-0.5'
                 )}
               >
                 <div className="flex items-start justify-between">
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">{item.name}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                    <p className={clsx(
+                      "text-sm font-medium truncate transition-colors",
+                      session?.id === item.id ? "text-foreground" : "text-zinc-600 group-hover:text-foreground"
+                    )}>{item.name}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">
                       {item.slideCount} slides · {formatDate(item.updatedAt)}
                     </p>
                   </div>
                   <button
                     onClick={(e) => handleDeleteSession(e, item.id)}
-                    className="p-1 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 rounded transition-all"
+                    className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 rounded-md transition-all absolute right-2 top-2"
                     title="Delete session"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         )}

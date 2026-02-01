@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
 import { Search, X, FileText, MessageSquare, Mic, ArrowRight, Sparkles, Filter } from 'lucide-react'
 import { clsx } from 'clsx'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface SearchResult {
   type: 'slide' | 'note' | 'transcript' | 'enhanced'
@@ -25,6 +26,7 @@ export function SearchModal({ onClose }: SearchModalProps) {
   const [filter, setFilter] = useState<ResultFilter>('all')
   const inputRef = useRef<HTMLInputElement>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
+  const focusTrapRef = useFocusTrap<HTMLDivElement>(true)
 
   // Focus input on mount
   useEffect(() => {
@@ -217,12 +219,17 @@ export function SearchModal({ onClose }: SearchModalProps) {
       onClick={onClose}
     >
       <div 
+        ref={focusTrapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="search-modal-title"
         className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
-          <Search className="w-5 h-5 text-muted-foreground" />
+          <label id="search-modal-title" className="sr-only">Search slides, notes, and transcripts</label>
+          <Search className="w-5 h-5 text-muted-foreground" aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"

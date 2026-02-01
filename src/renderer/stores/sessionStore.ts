@@ -98,7 +98,7 @@ interface SessionStore {
   setPdfFileName: (fileName: string) => void
 
   // Feedback
-  setFeedback: (rating: number, feedback: string) => void
+  setFeedback: (rating: number, feedback: string) => Promise<void>
   addRecordingDuration: (duration: number) => void
 }
 
@@ -132,9 +132,11 @@ const defaultUIState: UIState = {
   showFeedbackModal: false,
   showLiveTranscript: false,  // Hide transcript during recording by default (Granola-style)
   showEnhancedNotes: true,    // Show enhanced notes when available
+  showSlideList: true,        // Show slide thumbnails by default
 }
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+let saveInProgress: Promise<void> | null = null
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
   session: null,
@@ -204,27 +206,58 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   saveSession: async () => {
-    const { session } = get()
+    const { session, isSaving } = get()
     if (!session) return
+
+    // If a save is already in progress, wait for it to complete
+    if (isSaving && saveInProgress) {
+      try {
+        await saveInProgress
+        // Previous save succeeded, no need to save again
+        return
+      } catch {
+        // Previous save failed, continue with this one
+      }
+    }
 
     set({ isSaving: true })
 
-    try {
-      const updatedSession = {
-        ...session,
-        updatedAt: new Date().toISOString(),
-      }
+    saveInProgress = (async () => {
+      try {
+        const updatedSession = {
+          ...session,
+          updatedAt: new Date().toISOString(),
+        }
 
-      await window.electronAPI.saveSession(
-        session.id,
-        JSON.stringify(updatedSession)
-      )
-      set({ session: updatedSession, isSaving: false, error: null })
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to save session'
-      log.error('Failed to save session', error)
-      set({ isSaving: false, error: { message, type: 'save' } })
+        // Yield to the event loop before heavy JSON serialization
+        // This prevents blocking the UI during autosave
+        // Using queueMicrotask allows the event loop to process pending work
+        await new Promise<void>(resolve => queueMicrotask(resolve))
+
+        // Serialize session - can be heavy for large sessions
+        const serialized = JSON.stringify(updatedSession)
+
+        await window.electronAPI.saveSession(
+          session.id,
+          serialized
+        )
+        set({ session: updatedSession, isSaving: false, error: null })
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to save session'
+        log.error('Failed to save session', error)
+        set({ isSaving: false, error: { message, type: 'save' } })
+        throw error // Re-throw for internal queue handling
+      } finally {
+        saveInProgress = null
+      }
+    })()
+
+    // Await but catch errors - they're already handled in state
+    try {
+      await saveInProgress
+    } catch {
+      // Error already set in state, don't throw to caller
     }
   },
 
@@ -582,7 +615,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }))
   },
 
-  setFeedback: (rating: number, feedback: string) => {
+  setFeedback: async (rating: number, feedback: string) => {
     set(state => ({
       session: state.session
         ? {
@@ -596,8 +629,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           }
         : null,
     }))
-    // Save immediately after setting feedback
-    get().saveSession()
+    // Save immediately after setting feedback - await to ensure it completes
+    try {
+      await get().saveSession()
+    } catch (error) {
+      log.error('Failed to save feedback', error)
+    }
   },
 
   addRecordingDuration: (duration: number) => {
@@ -609,6 +646,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           }
         : null,
     }))
+    // Trigger autosave to persist recording duration
+    scheduleAutosave(get)
   },
 }))
 
