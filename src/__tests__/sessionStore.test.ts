@@ -30,11 +30,6 @@ describe('sessionStore', () => {
   beforeEach(() => {
     resetStore()
     vi.clearAllMocks()
-    vi.useFakeTimers()
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
   })
 
   describe('createSession', () => {
@@ -213,19 +208,32 @@ describe('sessionStore', () => {
     })
 
     it('should trigger autosave', async () => {
+      // Use fake timers only for this specific test
+      vi.useFakeTimers()
+
       window.electronAPI.saveSession = vi.fn().mockResolvedValue(undefined)
       window.electronAPI.listSessions = vi.fn().mockResolvedValue([])
-      
+
       const { createSession, setSlides } = useSessionStore.getState()
+
+      // Run createSession with real timers behavior
+      await vi.runAllTimersAsync()
       await createSession('Test')
-      
+      await vi.runAllTimersAsync()
+
       vi.clearAllMocks()
       setSlides(createMockSlides(3))
-      
-      // Autosave is scheduled after 3000ms
-      vi.advanceTimersByTime(3000)
-      
+
+      // Autosave is scheduled after 3000ms (AUTOSAVE_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(3000)
+
+      // Wait for any pending promises to resolve
+      await vi.runAllTimersAsync()
+
       expect(window.electronAPI.saveSession).toHaveBeenCalled()
+
+      // Restore real timers
+      vi.useRealTimers()
     })
   })
 

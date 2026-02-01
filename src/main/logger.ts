@@ -240,5 +240,18 @@ export const log = {
   info: (msg: string, data?: unknown, source?: string) => logger.info(msg, data, source),
   warn: (msg: string, data?: unknown, source?: string) => logger.warn(msg, data, source),
   error: (msg: string, err?: unknown, source?: string) => logger.error(msg, err, source),
+  
+  /**
+   * Security audit log - always written regardless of log level
+   * Use for security-relevant events like blocked actions, failed validations, etc.
+   */
+  security: (event: string, details?: Record<string, unknown>) => {
+    const data = {
+      securityEvent: true,
+      timestamp: new Date().toISOString(),
+      ...details,
+    }
+    logger.warn(`[SECURITY] ${event}`, data, 'security-audit')
+  },
 }
 

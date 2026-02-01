@@ -3,6 +3,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { X, Download, FileText, MessageSquare, Image, Sparkles, Eye, EyeOff, FileCode } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { ExportOptions } from '@shared/types'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface ExtendedExportOptions extends ExportOptions {
   preferEnhanced: boolean  // Use enhanced notes when available
@@ -15,6 +16,7 @@ interface ExportModalProps {
 
 export function ExportModal({ onClose }: ExportModalProps) {
   const { session } = useSessionStore()
+  const focusTrapRef = useFocusTrap<HTMLDivElement>(true)
   const [options, setOptions] = useState<ExtendedExportOptions>({
     includeSlides: true,
     includeNotes: true,
@@ -263,6 +265,10 @@ export function ExportModal({ onClose }: ExportModalProps) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div 
+        ref={focusTrapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-modal-title"
         className="modal-content max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
@@ -273,7 +279,7 @@ export function ExportModal({ onClose }: ExportModalProps) {
               <Download className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground tracking-tight">Export Session</h2>
+              <h2 id="export-modal-title" className="text-lg font-semibold text-foreground tracking-tight">Export Session</h2>
               <p className="text-xs text-muted-foreground">Export to {options.format === 'pdf' ? 'PDF' : 'Markdown'}</p>
             </div>
           </div>

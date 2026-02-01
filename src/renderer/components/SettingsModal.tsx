@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { X, Download, HardDrive, Cpu, Mic, CheckCircle2, AlertCircle, XCircle, Eye, Trash2, Copy, Check, FileText, RefreshCw } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccessibility } from '../hooks/useAccessibility'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface SettingsModalProps {
   onClose: () => void
@@ -52,6 +53,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [whisperInfo, setWhisperInfo] = useState<WhisperModelInfo | null>(null)
   const [llmInfo, setLlmInfo] = useState<LLMModelInfo | null>(null)
   const [activeTab, setActiveTab] = useState<'models' | 'accessibility' | 'storage' | 'about'>('models')
+  const focusTrapRef = useFocusTrap<HTMLDivElement>(true)
   
   const [whisperDownload, setWhisperDownload] = useState<DownloadState>({
     isDownloading: false,
@@ -335,12 +337,16 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div 
+        ref={focusTrapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-modal-title"
         className="modal-content max-w-xl h-[600px] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-zinc-50/50">
-          <h2 className="text-lg font-semibold text-foreground tracking-tight">Settings</h2>
+          <h2 id="settings-modal-title" className="text-lg font-semibold text-foreground tracking-tight">Settings</h2>
           <button
             onClick={onClose}
             className="p-2 hover:bg-zinc-100 rounded-lg transition-colors"

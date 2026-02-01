@@ -44,6 +44,15 @@ export const TRANSCRIPTION_CONFIG = {
   LOW_CONFIDENCE_THRESHOLD: 0.8,
   // Minimum audio duration in ms before sending for transcription
   MIN_CHUNK_DURATION_MS: 2000,
+  // Post-processing settings
+  POST_PROCESSING: {
+    // Default verbosity: 'verbatim' | 'clean' | 'minimal'
+    DEFAULT_VERBOSITY: 'clean' as const,
+    // Gap in ms to start a new paragraph
+    PARAGRAPH_GAP_MS: 5000,
+    // Whether to use slide context for term correction
+    USE_SLIDE_CONTEXT: true,
+  },
 } as const
 
 // UI defaults
@@ -61,9 +70,13 @@ export const SHORTCUTS = {
   PREV_SLIDE: 'ArrowLeft',
   TOGGLE_RECORDING: 'r',
   TOGGLE_AI_CHAT: 'a',
+  FOCUS_NOTES: 'n',
   SAVE: 'Meta+s',
   EXPORT: 'Meta+e',
   IMPORT_PDF: 'Meta+o',
+  NEW_SESSION: 'Meta+n',
+  SETTINGS: 'Meta+,',
+  TOGGLE_SIDEBAR: 'Meta+\\',
 } as const
 
 // Autosave interval

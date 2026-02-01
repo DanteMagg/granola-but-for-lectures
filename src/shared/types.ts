@@ -120,6 +120,8 @@ export interface UIState {
   showLiveTranscript: boolean
   // Show enhanced notes vs original in review mode
   showEnhancedNotes: boolean
+  // Toggle slide thumbnail list visibility
+  showSlideList: boolean
 }
 
 // Session feedback

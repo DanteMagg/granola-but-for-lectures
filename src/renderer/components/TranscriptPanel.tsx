@@ -24,63 +24,52 @@ export function TranscriptPanel() {
 
   return (
     <div 
-      className="border-t border-border bg-white"
-      style={{ height: isExpanded ? ui.transcriptPanelHeight : 'auto' }}
+      className="border-t border-border bg-zinc-50/30 flex-shrink-0 transition-all duration-300 ease-in-out"
+      style={{ maxHeight: isExpanded ? '180px' : '36px' }}
     >
-      {/* Header */}
-      <div className="px-4 py-2 border-b border-border flex items-center justify-between bg-zinc-50/30">
+      {/* Compact Header */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full px-3 py-2 flex items-center justify-between hover:bg-zinc-100/80 transition-colors group"
+      >
         <div className="flex items-center gap-2">
-          <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <MessageSquare className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider group-hover:text-foreground transition-colors">
             Transcript
           </span>
           {transcripts.length > 0 && (
-            <span className="text-xs text-muted-foreground bg-zinc-100 px-1.5 py-0.5 rounded-full">
+            <span className="text-[10px] text-muted-foreground bg-zinc-200/50 px-1.5 py-0.5 rounded-full group-hover:bg-zinc-200 transition-colors">
               {transcripts.length}
             </span>
           )}
-        </div>
-
-        <div className="flex items-center gap-2">
           {session.isRecording && (
-            <span className="flex items-center gap-1.5 text-xs text-red-500 font-medium bg-red-50 px-2 py-0.5 rounded-full">
-              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-              Recording
+            <span className="flex items-center gap-1.5 text-[10px] text-red-600 font-medium bg-red-50 px-1.5 py-0.5 rounded-full border border-red-100">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
+              </span>
+              Live
             </span>
           )}
-
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1 hover:bg-zinc-100 rounded transition-colors"
-            title={isExpanded ? 'Collapse' : 'Expand'}
-          >
-            {isExpanded ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            ) : (
-              <ChevronUp className="w-4 h-4 text-muted-foreground" />
-            )}
-          </button>
         </div>
-      </div>
+        <ChevronDown className={clsx(
+          "w-3.5 h-3.5 text-muted-foreground transition-transform duration-300",
+          !isExpanded && "rotate-180"
+        )} />
+      </button>
 
-      {/* Transcript content */}
-      {isExpanded && (
-        <div className="p-4 overflow-y-auto" style={{ height: ui.transcriptPanelHeight - 45 }}>
-          {transcripts.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="w-10 h-10 rounded-full bg-zinc-50 flex items-center justify-center mx-auto mb-3">
-                <MessageSquare className="w-5 h-5 text-zinc-300" />
-              </div>
-              <p className="text-sm text-muted-foreground">
+      {/* Compact Transcript content */}
+      <div className={clsx(
+        "px-3 pb-2 overflow-y-auto transition-opacity duration-300",
+        isExpanded ? "opacity-100" : "opacity-0 invisible"
+      )} style={{ maxHeight: '140px' }}>
+        {transcripts.length === 0 ? (
+            <div className="text-center py-4">
+              <p className="text-xs text-muted-foreground">
                 {session.isRecording 
-                  ? 'Listening for speech...'
-                  : 'No transcript for this slide yet.'}
+                  ? 'Listening...'
+                  : 'No transcript yet'}
               </p>
-              {!session.isRecording && (
-                <p className="text-xs text-zinc-400 mt-1">
-                  Start recording to capture lecture audio.
-                </p>
-              )}
             </div>
           ) : (
             <div className="space-y-1">
@@ -88,38 +77,29 @@ export function TranscriptPanel() {
                 <div 
                   key={segment.id} 
                   className={clsx(
-                    'transcript-segment group',
+                    'transcript-segment text-xs',
                     index === transcripts.length - 1 && session.isRecording && 'active',
                     segment.confidence < TRANSCRIPTION_CONFIG.LOW_CONFIDENCE_THRESHOLD && 'opacity-70'
                   )}
                 >
-                  <div className="flex items-start gap-4">
-                    <span className="text-[10px] text-zinc-400 font-mono mt-1 flex-shrink-0 w-8 text-right group-hover:text-zinc-500 transition-colors">
+                  <div className="flex items-start gap-2">
+                    <span className="text-[9px] text-zinc-400 font-mono mt-0.5 flex-shrink-0 w-6 text-right">
                       {formatTime(segment.startTime)}
                     </span>
-                    <div className="flex-1">
-                      <p className={clsx(
-                        'text-sm leading-relaxed',
-                        segment.confidence < TRANSCRIPTION_CONFIG.LOW_CONFIDENCE_THRESHOLD 
-                          ? 'text-muted-foreground italic' 
-                          : 'text-foreground'
-                      )}>
-                        {segment.text}
-                      </p>
-                      {segment.confidence < TRANSCRIPTION_CONFIG.LOW_CONFIDENCE_THRESHOLD && (
-                        <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 mt-1">
-                          <AlertTriangle className="w-2.5 h-2.5" />
-                          Low confidence ({Math.round(segment.confidence * 100)}%)
-                        </span>
-                      )}
-                    </div>
+                    <p className={clsx(
+                      'flex-1 leading-relaxed',
+                      segment.confidence < TRANSCRIPTION_CONFIG.LOW_CONFIDENCE_THRESHOLD 
+                        ? 'text-muted-foreground italic' 
+                        : 'text-foreground'
+                    )}>
+                      {segment.text}
+                    </p>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
-      )}
     </div>
   )
 }

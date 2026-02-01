@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, session } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import * as fsPromises from 'fs/promises'
@@ -11,6 +11,48 @@ import { logger, log } from './logger.js'
 // ES module __dirname polyfill
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+// ==========================================
+// Security: IPC Channel Allowlist
+// ==========================================
+const ALLOWED_IPC_CHANNELS = new Set([
+  'dialog:openPdf',
+  'session:save',
+  'session:load',
+  'session:list',
+  'session:delete',
+  'audio:save',
+  'audio:delete',
+  'app:getPaths',
+  'export:pdf',
+  'export:generatePdf',
+  'logs:get',
+  'logs:getAll',
+  'logs:clear',
+  'logs:getPath',
+  'logs:write',
+  'whisper:init',
+  'whisper:transcribe',
+  'whisper:getInfo',
+  'whisper:getModels',
+  'whisper:setModel',
+  'whisper:downloadModel',
+  'whisper:deleteModel',
+  'whisper:cancelDownload',
+  'llm:init',
+  'llm:generate',
+  'llm:generateStream',
+  'llm:getInfo',
+  'llm:getModels',
+  'llm:setModel',
+  'llm:unload',
+  'llm:downloadModel',
+  'llm:deleteModel',
+  'llm:cancelDownload',
+])
+
+// Valid log levels for renderer logging
+const VALID_LOG_LEVELS = new Set(['debug', 'info', 'warn', 'error'])
 
 // Export data structure for PDF generation
 interface ExportData {
@@ -54,14 +96,14 @@ function sanitizeSessionId(sessionId: string): string | null {
 
   // Must be at least 1 char and match what we cleaned
   if (sanitized.length === 0 || sanitized !== sessionId) {
-    log.warn('Invalid session ID rejected', { sessionId }, 'security')
+    log.security('SESSION_ID_INVALID', { sessionId, action: 'rejected' })
     return null
   }
 
   // Additional check: ensure resolved path stays within sessions directory
   const resolvedPath = path.resolve(sessionsPath, sanitized)
   if (!resolvedPath.startsWith(sessionsPath)) {
-    log.warn('Path traversal attempt blocked', { sessionId }, 'security')
+    log.security('PATH_TRAVERSAL_BLOCKED', { sessionId, action: 'blocked' })
     return null
   }
 
@@ -90,8 +132,65 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true, // Security: Enable renderer sandbox
+      webSecurity: true, // Security: Enforce same-origin policy
+      allowRunningInsecureContent: false, // Security: Block mixed content
       preload: path.join(__dirname, '../preload.js'),
     },
+  })
+
+  // Security: Set strict CSP for production
+  if (!isDev) {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; " +
+            "script-src 'self'; " +
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+            "font-src 'self' https://fonts.gstatic.com; " +
+            "img-src 'self' data: blob:; " +
+            "connect-src 'self'; " +
+            "worker-src 'self' blob:; " +
+            "frame-src 'none'; " +
+            "object-src 'none'; " +
+            "base-uri 'self';"
+          ]
+        }
+      })
+    })
+  }
+
+  // Security: Validate IPC channels
+  mainWindow.webContents.on('ipc-message', (event, channel) => {
+    if (!ALLOWED_IPC_CHANNELS.has(channel)) {
+      log.security('IPC_CHANNEL_BLOCKED', { channel, action: 'blocked' })
+      event.preventDefault()
+    }
+  })
+
+  // Security: Prevent navigation to external URLs
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const parsedUrl = new URL(url)
+    const allowedOrigins = ['localhost', '127.0.0.1']
+    
+    if (isDev && allowedOrigins.some(origin => parsedUrl.hostname === origin)) {
+      return // Allow dev server navigation
+    }
+    
+    if (parsedUrl.protocol === 'file:') {
+      return // Allow local file navigation in production
+    }
+    
+    log.security('EXTERNAL_NAVIGATION_BLOCKED', { url, action: 'blocked' })
+    event.preventDefault()
+  })
+
+  // Security: Block new window creation
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    log.security('NEW_WINDOW_BLOCKED', { url, action: 'blocked' })
+    return { action: 'deny' }
   })
 
   if (isDev) {
@@ -331,10 +430,60 @@ ipcMain.handle('export:pdf', async (_event, sessionId: string) => {
   return result.filePath
 })
 
+/**
+ * Validates that a file path is safe for export operations.
+ * Must be in user-accessible directories (Desktop, Documents, Downloads).
+ */
+function validateExportPath(filePath: string): boolean {
+  if (!filePath || typeof filePath !== 'string') {
+    return false
+  }
+
+  // Normalize and resolve the path
+  const normalizedPath = path.resolve(filePath)
+  
+  // Get allowed export directories
+  const allowedDirs = [
+    app.getPath('desktop'),
+    app.getPath('documents'),
+    app.getPath('downloads'),
+    app.getPath('home'), // Allow anywhere in home directory
+  ]
+
+  // Check if path is within allowed directories
+  const isAllowed = allowedDirs.some(dir => normalizedPath.startsWith(dir))
+  
+  if (!isAllowed) {
+    log.security('EXPORT_PATH_BLOCKED', { 
+      filePath: normalizedPath, 
+      action: 'blocked',
+      reason: 'outside_allowed_directories'
+    })
+    return false
+  }
+
+  // Ensure it's a PDF file
+  if (!normalizedPath.toLowerCase().endsWith('.pdf')) {
+    log.security('EXPORT_PATH_BLOCKED', { 
+      filePath: normalizedPath, 
+      action: 'blocked',
+      reason: 'invalid_extension'
+    })
+    return false
+  }
+
+  return true
+}
+
 // Generate PDF from export data
 ipcMain.handle(
   'export:generatePdf',
   async (_event, filePath: string, exportData: ExportData) => {
+    // Security: Validate export path
+    if (!validateExportPath(filePath)) {
+      throw new Error('Invalid export path')
+    }
+
     return new Promise<boolean>((resolve, reject) => {
       try {
         const doc = new PDFDocument({
@@ -467,21 +616,33 @@ ipcMain.handle('logs:getPath', async () => {
 
 // Log from renderer process
 ipcMain.handle('logs:write', async (_event, level: string, message: string, data?: unknown) => {
+  // Security: Validate log level
+  if (!VALID_LOG_LEVELS.has(level)) {
+    log.security('INVALID_LOG_LEVEL', { providedLevel: level, action: 'sanitized' })
+    level = 'info'
+  }
+
+  // Security: Sanitize message length to prevent log flooding
+  const maxMessageLength = 10000
+  const sanitizedMessage = typeof message === 'string' 
+    ? message.slice(0, maxMessageLength) 
+    : String(message).slice(0, maxMessageLength)
+
   switch (level) {
     case 'debug':
-      log.debug(message, data, 'renderer')
+      log.debug(sanitizedMessage, data, 'renderer')
       break
     case 'info':
-      log.info(message, data, 'renderer')
+      log.info(sanitizedMessage, data, 'renderer')
       break
     case 'warn':
-      log.warn(message, data, 'renderer')
+      log.warn(sanitizedMessage, data, 'renderer')
       break
     case 'error':
-      log.error(message, data, 'renderer')
+      log.error(sanitizedMessage, data, 'renderer')
       break
     default:
-      log.info(message, data, 'renderer')
+      log.info(sanitizedMessage, data, 'renderer')
   }
   return true
 })

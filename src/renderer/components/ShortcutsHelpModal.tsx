@@ -1,5 +1,6 @@
 import { X, Keyboard } from 'lucide-react'
 import { useSessionStore } from '../stores/sessionStore'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface ShortcutItem {
   keys: string[]
@@ -11,16 +12,20 @@ const shortcuts: ShortcutItem[] = [
   // Navigation
   { keys: ['←'], description: 'Previous slide', category: 'navigation' },
   { keys: ['→'], description: 'Next slide', category: 'navigation' },
+  { keys: ['N'], description: 'Focus notes editor', category: 'navigation' },
   
   // Recording & AI
   { keys: ['R'], description: 'Toggle recording', category: 'recording' },
   { keys: ['A'], description: 'Toggle AI chat', category: 'recording' },
   
   // General
+  { keys: ['⌘', 'N'], description: 'New session', category: 'general' },
   { keys: ['⌘', 'K'], description: 'Search slides & notes', category: 'general' },
   { keys: ['⌘', 'S'], description: 'Save session', category: 'general' },
   { keys: ['⌘', 'E'], description: 'Export to PDF', category: 'general' },
   { keys: ['⌘', 'O'], description: 'Import PDF', category: 'general' },
+  { keys: ['⌘', ','], description: 'Open settings', category: 'general' },
+  { keys: ['⌘', '\\'], description: 'Toggle sidebar', category: 'general' },
   { keys: ['?'], description: 'Show keyboard shortcuts', category: 'general' },
   { keys: ['Esc'], description: 'Close modal / Cancel', category: 'general' },
 ]
@@ -33,6 +38,7 @@ const categoryLabels = {
 
 export function ShortcutsHelpModal() {
   const { setUIState } = useSessionStore()
+  const focusTrapRef = useFocusTrap<HTMLDivElement>(true)
 
   const handleClose = () => {
     setUIState({ showShortcutsHelp: false })
@@ -49,6 +55,10 @@ export function ShortcutsHelpModal() {
   return (
     <div className="modal-overlay" onClick={handleClose}>
       <div 
+        ref={focusTrapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shortcuts-modal-title"
         className="modal-content max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
@@ -56,7 +66,7 @@ export function ShortcutsHelpModal() {
         <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-zinc-50/50">
           <div className="flex items-center gap-2">
             <Keyboard className="w-5 h-5 text-muted-foreground" />
-            <h2 className="text-lg font-semibold text-foreground tracking-tight">
+            <h2 id="shortcuts-modal-title" className="text-lg font-semibold text-foreground tracking-tight">
               Keyboard Shortcuts
             </h2>
           </div>

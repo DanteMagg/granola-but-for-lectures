@@ -52,6 +52,7 @@ export const createMockUIState = (overrides?: Partial<UIState>): UIState => ({
   showFeedbackModal: false,
   showLiveTranscript: false,
   showEnhancedNotes: true,
+  showSlideList: true,
   ...overrides,
 })
 

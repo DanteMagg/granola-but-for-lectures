@@ -79,30 +79,34 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
   }, [])
 
   /**
-   * Get transcript text for a slide
+   * Get transcript text for a slide (reads fresh from store to avoid stale closures)
    */
   const getSlideTranscript = useCallback((slideId: string): string => {
-    if (!session) return ''
-    const segments = session.transcripts[slideId] || []
+    const currentSession = useSessionStore.getState().session
+    if (!currentSession) return ''
+    const segments = currentSession.transcripts[slideId] || []
     return segments.map((s: TranscriptSegment) => s.text).join(' ')
-  }, [session])
+  }, [])
 
   /**
-   * Get user notes for a slide
+   * Get user notes for a slide (reads fresh from store to avoid stale closures)
    */
   const getSlideNotes = useCallback((slideId: string): string => {
-    if (!session) return ''
-    const note = session.notes[slideId]
+    const currentSession = useSessionStore.getState().session
+    if (!currentSession) return ''
+    const note = currentSession.notes[slideId]
     return note?.plainText || ''
-  }, [session])
+  }, [])
 
   /**
    * Enhance a single slide's notes
    */
   const enhanceSlide = useCallback(async (slideId: string): Promise<void> => {
-    if (!session || enhancingRef.current) return
-    
-    const slide = session.slides.find((s: Slide) => s.id === slideId)
+    // Get fresh session from store to avoid stale closures
+    const currentSession = useSessionStore.getState().session
+    if (!currentSession || enhancingRef.current) return
+
+    const slide = currentSession.slides.find((s: Slide) => s.id === slideId)
     if (!slide) return
 
     // Check LLM availability
@@ -121,7 +125,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
       slideId,
       content: '',
       plainText: '',
-      originalNoteId: session.notes[slideId]?.id,
+      originalNoteId: currentSession.notes[slideId]?.id,
       enhancedAt: new Date().toISOString(),
       status: 'generating',
     }
@@ -132,7 +136,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
       const context: EnhanceNotesContext = {
         slideText: slide.extractedText || '',
         slideIndex: slide.index + 1, // 1-based for display
-        totalSlides: session.slides.length,
+        totalSlides: currentSession.slides.length,
         userNotes: getSlideNotes(slideId),
         transcript: getSlideTranscript(slideId),
       }
@@ -165,21 +169,23 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
     } catch (err) {
       console.error('Enhancement error:', err)
       updateEnhancedNoteStatus(
-        slideId, 
-        'error', 
+        slideId,
+        'error',
         err instanceof Error ? err.message : 'Enhancement failed'
       )
     } finally {
       enhancingRef.current = false
     }
-  }, [session, checkLLMStatus, getSlideNotes, getSlideTranscript, setEnhancedNote, updateEnhancedNoteStatus])
+  }, [checkLLMStatus, getSlideNotes, getSlideTranscript, setEnhancedNote, updateEnhancedNoteStatus])
 
   /**
    * Enhance all slides in the session
    */
   const enhanceAllSlides = useCallback(async (): Promise<void> => {
-    if (!session || enhancingRef.current) return
-    
+    // Get fresh session from store to avoid stale closures
+    const currentSession = useSessionStore.getState().session
+    if (!currentSession || enhancingRef.current) return
+
     // Check LLM availability first
     const available = await checkLLMStatus()
     if (!available) {
@@ -196,10 +202,12 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
     cancelledRef.current = false
     setSessionPhase('enhancing')
 
-    const slidesToEnhance = session.slides.filter((slide: Slide) => {
+    // Get fresh session and filter slides
+    const freshSession = useSessionStore.getState().session!
+    const slidesToEnhance = freshSession.slides.filter((slide: Slide) => {
       // Only enhance slides that have transcript or notes
-      const hasTranscript = (session.transcripts[slide.id]?.length || 0) > 0
-      const hasNotes = session.notes[slide.id]?.plainText?.trim().length > 0
+      const hasTranscript = (freshSession.transcripts[slide.id]?.length || 0) > 0
+      const hasNotes = freshSession.notes[slide.id]?.plainText?.trim().length > 0
       return hasTranscript || hasNotes
     })
 
@@ -220,13 +228,16 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
       const slide = slidesToEnhance[i]
       setProgress(prev => ({ ...prev, currentSlide: i + 1 }))
 
+      // Get fresh session state for each slide to include any updates made during enhancement
+      const latestSession = useSessionStore.getState().session!
+
       // Create pending note
       const enhancedNote: EnhancedNote = {
         id: uuidv4(),
         slideId: slide.id,
         content: '',
         plainText: '',
-        originalNoteId: session.notes[slide.id]?.id,
+        originalNoteId: latestSession.notes[slide.id]?.id,
         enhancedAt: new Date().toISOString(),
         status: 'generating',
       }
@@ -236,7 +247,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
         const context: EnhanceNotesContext = {
           slideText: slide.extractedText || '',
           slideIndex: slide.index + 1,
-          totalSlides: session.slides.length,
+          totalSlides: latestSession.slides.length,
           userNotes: getSlideNotes(slide.id),
           transcript: getSlideTranscript(slide.id),
         }
@@ -278,7 +289,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
     })
     setSessionPhase('enhanced')
     enhancingRef.current = false
-  }, [session, checkLLMStatus, getSlideNotes, getSlideTranscript, setEnhancedNote, updateEnhancedNoteStatus, setSessionPhase])
+  }, [checkLLMStatus, getSlideNotes, getSlideTranscript, setEnhancedNote, updateEnhancedNoteStatus, setSessionPhase])
 
   /**
    * Cancel ongoing enhancement
