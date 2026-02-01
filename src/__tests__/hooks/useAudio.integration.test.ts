@@ -160,6 +160,7 @@ describe('useAudio - Integration Tests', () => {
       }),
       setRecording: mockSetRecording,
       addTranscriptSegment: mockAddTranscriptSegment,
+      addRecordingDuration: vi.fn(),
     } as any)
 
     // Mock window.electronAPI

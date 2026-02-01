@@ -6,9 +6,11 @@ import * as https from 'https'
 import * as http from 'http'
 import * as crypto from 'crypto'
 import { log } from '../logger.js'
+import { WorkerManager } from '../workers/worker-manager.js'
+import { validateAudioInput, ALLOWED_WHISPER_MODELS, validateModelName } from '../security.js'
 
 // Whisper integration bridge
-// Uses whisper-node for actual transcription
+// Uses worker thread for CPU-intensive transcription to prevent blocking IPC
 
 /**
  * Verify file integrity using SHA256 hash
@@ -91,7 +93,7 @@ const WHISPER_MODELS: Record<string, { url: string; size: string; filename: stri
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin',
     size: '466 MB',
     filename: 'ggml-small.en.bin',
-    sha256: '20c8ef0c2a8bd585a8c5e7b2c6e45f5a1b3a3e5d0f7a9b2c3d4e5f6a7b8c9d0e', // Placeholder - verify from HF
+    // sha256 not verified - remove to skip hash verification for this model
   },
   'medium': {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin',
@@ -103,7 +105,7 @@ const WHISPER_MODELS: Record<string, { url: string; size: string; filename: stri
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin',
     size: '1.5 GB',
     filename: 'ggml-medium.en.bin',
-    sha256: 'a5e9c5a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3', // Placeholder - verify from HF
+    // sha256 not verified - remove to skip hash verification for this model
   },
 }
 
@@ -128,6 +130,8 @@ class WhisperBridge {
   private modelPath: string
   private whisperModule: any = null
   private downloadAbortController: AbortController | null = null
+  private workerManager: WorkerManager | null = null
+  private useWorker: boolean = true
 
   constructor() {
     const userDataPath = app.getPath('userData')
@@ -142,6 +146,33 @@ class WhisperBridge {
 
     // Clean up any stale temp files from previous sessions on startup
     this.cleanupTempFiles()
+  }
+
+  /**
+   * Start the worker thread for background transcription
+   */
+  private async startWorker(): Promise<boolean> {
+    if (this.workerManager?.ready) {
+      return true
+    }
+
+    try {
+      this.workerManager = new WorkerManager('./whisper-worker.js', 'whisper')
+      const started = await this.workerManager.start()
+      
+      if (started) {
+        // Initialize the worker with the model
+        const result = await this.workerManager.send<{ success: boolean }>('init', {
+          modelPath: this.config.modelPath,
+          modelName: this.config.modelName,
+        })
+        return result.success
+      }
+    } catch (error) {
+      log.warn('Failed to start Whisper worker, falling back to main thread', error, 'whisper')
+      this.useWorker = false
+    }
+    return false
   }
 
   /**
@@ -189,12 +220,26 @@ class WhisperBridge {
       return false
     }
 
+    // Try to start worker thread first (non-blocking transcription)
+    if (this.useWorker) {
+      const workerStarted = await this.startWorker()
+      if (workerStarted) {
+        this.isLoaded = true
+        log.info('Whisper initialized with worker thread', {
+          model: this.config.modelName,
+          size: stats.size
+        }, 'whisper')
+        return true
+      }
+    }
+
+    // Fallback to main thread (blocks IPC during transcription)
     try {
       // Dynamic import of whisper-node
       this.whisperModule = await this.loadWhisperModule()
       if (this.whisperModule) {
         this.isLoaded = true
-        log.info('Whisper initialized', {
+        log.info('Whisper initialized (main thread fallback)', {
           model: this.config.modelName,
           size: stats.size
         }, 'whisper')
@@ -251,6 +296,24 @@ class WhisperBridge {
       return this.fallbackTranscribe()
     }
 
+    const tempDir = options?.tempDir || app.getPath('temp')
+
+    // Use worker thread if available (non-blocking)
+    if (this.workerManager?.ready) {
+      try {
+        log.debug('Running Whisper transcription in worker', undefined, 'whisper')
+        const result = await this.workerManager.send<TranscriptionResult>('transcribe', {
+          audioBase64: audioBuffer.toString('base64'),
+          tempDir,
+        })
+        return result
+      } catch (error) {
+        log.error('Worker transcription failed, trying main thread', error, 'whisper')
+        // Fall through to main thread
+      }
+    }
+
+    // Main thread fallback (blocks IPC)
     if (!this.whisperModule || typeof this.whisperModule !== 'function') {
       log.error('whisperModule is not a function', {
         type: typeof this.whisperModule,
@@ -259,7 +322,6 @@ class WhisperBridge {
       return this.fallbackTranscribe()
     }
 
-    const tempDir = options?.tempDir || app.getPath('temp')
     const tempFile = path.join(tempDir, `whisper-${Date.now()}.wav`)
 
     try {
@@ -280,7 +342,7 @@ class WhisperBridge {
         }
       }
 
-      log.debug('Running Whisper transcription', { 
+      log.debug('Running Whisper transcription (main thread)', { 
         file: tempFile,
         modelPath: this.config.modelPath,
         moduleType: typeof this.whisperModule
@@ -528,7 +590,7 @@ class WhisperBridge {
 
           // Verify download completeness
           if (totalSize > 0 && downloadedSize < totalSize * 0.99) {
-            fs.unlink(destPath, () => {})
+            fsPromises.unlink(destPath).catch(() => {})
             reject(new Error(`Incomplete download: got ${downloadedSize} of ${totalSize} bytes`))
             return
           }
@@ -538,14 +600,14 @@ class WhisperBridge {
 
         writeStream.on('error', (err) => {
           log.error('Write stream error', err, 'whisper')
-          fs.unlink(destPath, () => {}) // Clean up on error
+          fsPromises.unlink(destPath).catch(() => {}) // Clean up on error
           reject(err)
         })
 
         response.on('error', (err) => {
           log.error('Response stream error', err, 'whisper')
           writeStream.close()
-          fs.unlink(destPath, () => {})
+          fsPromises.unlink(destPath).catch(() => {})
           reject(err)
         })
 
@@ -577,6 +639,19 @@ class WhisperBridge {
         this.config.modelPath = newPath
         this.config.modelName = modelName
         this.isLoaded = false // Need to reinitialize
+        
+        // Update worker if running
+        if (this.workerManager?.ready) {
+          try {
+            await this.workerManager.send('setModel', {
+              modelPath: newPath,
+              modelName,
+            })
+          } catch (error) {
+            log.warn('Failed to update worker model', error, 'whisper')
+          }
+        }
+        
         return await this.initialize()
       }
     }
@@ -584,15 +659,14 @@ class WhisperBridge {
   }
 
   async deleteModel(): Promise<boolean> {
-    if (fs.existsSync(this.modelPath)) {
-      try {
-        fs.rmSync(this.modelPath, { recursive: true, force: true })
-        this.isLoaded = false
-        log.info('Whisper model deleted', { path: this.modelPath }, 'whisper')
-        return true
-      } catch (e) {
+    try {
+      await fsPromises.rm(this.modelPath, { recursive: true, force: true })
+      this.isLoaded = false
+      log.info('Whisper model deleted', { path: this.modelPath }, 'whisper')
+      return true
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
         log.error('Failed to delete model', e, 'whisper')
-        return false
       }
     }
     return false
@@ -650,6 +724,13 @@ export function registerWhisperHandlers() {
   })
 
   ipcMain.handle('whisper:transcribe', async (_event, audioBase64: string) => {
+    // Security: Validate audio input size and format
+    const validation = validateAudioInput(audioBase64)
+    if (!validation.valid) {
+      log.warn('Invalid audio input rejected', { error: validation.error }, 'security')
+      throw new Error(validation.error || 'Invalid audio input')
+    }
+    
     const audioBuffer = Buffer.from(audioBase64, 'base64')
     return await bridge.transcribe(audioBuffer)
   })
@@ -663,10 +744,19 @@ export function registerWhisperHandlers() {
   })
 
   ipcMain.handle('whisper:setModel', async (_event, modelName: string) => {
+    // Security: Validate model name against allowlist
+    if (!validateModelName(modelName, ALLOWED_WHISPER_MODELS, 'whisper')) {
+      throw new Error(`Invalid model name: ${modelName}`)
+    }
     return await bridge.setModel(modelName)
   })
 
   ipcMain.handle('whisper:downloadModel', async (event, modelName: string) => {
+    // Security: Validate model name against allowlist
+    if (!validateModelName(modelName, ALLOWED_WHISPER_MODELS, 'whisper')) {
+      return { success: false, error: `Invalid model name: ${modelName}` }
+    }
+    
     const result = await bridge.downloadModel(modelName, (downloaded, total) => {
       const percent = total > 0 ? Math.round((downloaded / total) * 100) : 0
       event.sender.send('whisper:downloadProgress', {

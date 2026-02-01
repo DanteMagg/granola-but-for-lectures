@@ -1,5 +1,5 @@
 // Test helper for creating mock data with all required fields
-import type { Session, Slide, Note, UIState } from '@shared/types'
+import type { Session, Slide, Note, UIState, TranscriptSegment } from '@shared/types'
 
 export const createMockSlide = (overrides?: Partial<Slide>): Slide => ({
   id: 'slide-1',
@@ -53,6 +53,16 @@ export const createMockUIState = (overrides?: Partial<UIState>): UIState => ({
   showLiveTranscript: false,
   showEnhancedNotes: true,
   showSlideList: true,
+  ...overrides,
+})
+
+export const createMockTranscriptSegment = (overrides?: Partial<TranscriptSegment>): TranscriptSegment => ({
+  id: 'segment-1',
+  slideId: 'slide-1',
+  text: 'Transcribed text content',
+  startTime: 0,
+  endTime: 3000,
+  confidence: 0.95,
   ...overrides,
 })
 

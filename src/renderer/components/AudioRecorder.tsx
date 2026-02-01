@@ -14,6 +14,10 @@ const MAX_TRANSCRIPTION_QUEUE_SIZE = 10
 // Number of consecutive failures before showing user warning
 const TRANSCRIPTION_FAILURE_THRESHOLD = 3
 
+// Maximum number of audio chunks to keep in memory for final save
+// Prevents unbounded memory growth during very long recordings
+const MAX_RECORDING_CHUNKS = 3600 // ~1 hour at 1 chunk/second
+
 interface WhisperStatus {
   loaded: boolean
   exists: boolean
@@ -40,12 +44,16 @@ export function AudioRecorder() {
   const chunksRef = useRef<Blob[]>([])
   const transcriptionChunksRef = useRef<Blob[]>([])
   const startTimeRef = useRef<number>(0)
+  const pausedAtRef = useRef<number>(0)
+  const totalPausedDurationRef = useRef<number>(0)
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const isTranscribingRef = useRef(false)
   const transcriptionQueueRef = useRef<Blob[]>([])
   const transcriptionFailureCountRef = useRef(0)
   const hasShownTranscriptionWarningRef = useRef(false)
+  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const phaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Ref to track if we should toggle (to avoid stale closure issues)
   const isRecordingRef = useRef(false)
@@ -154,7 +162,9 @@ export function AudioRecorder() {
       const result = await window.electronAPI.whisperTranscribe(base64Audio)
 
       if (result && result.segments && result.segments.length > 0) {
-        const currentSlide = session.slides[session.currentSlideIndex]
+        // Read fresh from store to get current slide at transcription time (avoid stale closure)
+        const freshSession = useSessionStore.getState().session
+        const currentSlide = freshSession?.slides[freshSession.currentSlideIndex]
         if (!currentSlide) return
 
         for (const segment of result.segments) {
@@ -181,7 +191,9 @@ export function AudioRecorder() {
         
         // Filter placeholder messages
         if (!text.startsWith('[') || !text.endsWith(']')) {
-          const currentSlide = session.slides[session.currentSlideIndex]
+          // Read fresh from store to get current slide at transcription time (avoid stale closure)
+          const freshSession = useSessionStore.getState().session
+          const currentSlide = freshSession?.slides[freshSession.currentSlideIndex]
           if (currentSlide) {
             const elapsedTime = Date.now() - startTimeRef.current
 
@@ -259,10 +271,17 @@ export function AudioRecorder() {
       chunksRef.current = []
       transcriptionChunksRef.current = []
       transcriptionQueueRef.current = []
+      totalPausedDurationRef.current = 0
+      pausedAtRef.current = 0
       setPendingChunks(0)
 
       mediaRecorderRef.current.ondataavailable = async (event) => {
         if (event.data.size > 0) {
+          // Limit chunks to prevent unbounded memory growth in very long recordings
+          if (chunksRef.current.length >= MAX_RECORDING_CHUNKS) {
+            // Remove oldest chunk to make room (sliding window)
+            chunksRef.current.shift()
+          }
           chunksRef.current.push(event.data)
           transcriptionChunksRef.current.push(event.data)
           
@@ -322,9 +341,11 @@ export function AudioRecorder() {
       setRecordingStartTime(startTimeRef.current)
       setIsPaused(false)
 
-      // Start duration counter
+      // Start duration counter (accounts for paused time)
       durationIntervalRef.current = setInterval(() => {
-        setDuration(Date.now() - startTimeRef.current)
+        if (!isPaused) {
+          setDuration(Date.now() - startTimeRef.current - totalPausedDurationRef.current)
+        }
       }, 100)
 
       // Start audio level animation
@@ -332,6 +353,18 @@ export function AudioRecorder() {
 
     } catch (err) {
       console.error('Failed to start recording:', err)
+      
+      // Cleanup any partially initialized resources to prevent memory leaks
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(console.error)
+        audioContextRef.current = null
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
+        streamRef.current = null
+      }
+      analyserRef.current = null
+      mediaRecorderRef.current = null
       
       // Provide helpful error messages based on error type
       if (err instanceof DOMException) {
@@ -389,13 +422,13 @@ export function AudioRecorder() {
     // Show feedback modal if recording was substantial (> 30 seconds)
     // and user hasn't already given feedback for this session
     if (recordedDuration > 30000 && session && !session.feedback) {
-      setTimeout(() => {
+      feedbackTimeoutRef.current = setTimeout(() => {
         setUIState({ showFeedbackModal: true })
       }, 500) // Small delay for smoother UX
     }
 
     // Transition to ready_to_enhance after a short processing delay
-    setTimeout(() => {
+    phaseTimeoutRef.current = setTimeout(() => {
       setSessionPhase('ready_to_enhance')
     }, 1500) // Give time for final transcription chunks
   }
@@ -404,9 +437,15 @@ export function AudioRecorder() {
     if (!mediaRecorderRef.current) return
 
     if (isPaused) {
+      // Calculate how long we were paused and add to total
+      if (pausedAtRef.current > 0) {
+        totalPausedDurationRef.current += Date.now() - pausedAtRef.current
+        pausedAtRef.current = 0
+      }
       mediaRecorderRef.current.resume()
       setIsPaused(false)
     } else {
+      pausedAtRef.current = Date.now()
       mediaRecorderRef.current.pause()
       setIsPaused(true)
     }
@@ -421,8 +460,17 @@ export function AudioRecorder() {
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current)
       }
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop())
+      }
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current)
+      }
+      if (phaseTimeoutRef.current) {
+        clearTimeout(phaseTimeoutRef.current)
       }
     }
   }, [])

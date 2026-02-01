@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act } from '@testing-library/react'
 import { useSessionStore } from '../../renderer/stores/sessionStore'
+import { useSlideStore } from '../../renderer/stores/slideStore'
 import { createMockSlide } from '../helpers/mockData'
 import type { Session, EnhancedNote } from '@shared/types'
 
@@ -13,7 +14,7 @@ import type { Session, EnhancedNote } from '@shared/types'
 beforeEach(() => {
   vi.clearAllMocks()
   
-  // Reset the store
+  // Reset the stores (both sessionStore and slideStore since they're coupled)
   useSessionStore.setState({
     session: null,
     sessionList: [],
@@ -21,6 +22,7 @@ beforeEach(() => {
     isSaving: false,
     error: null,
   })
+  useSlideStore.getState().reset()
 
   // Mock comprehensive electronAPI
   window.electronAPI = {
@@ -161,12 +163,16 @@ describe('Integration Tests', () => {
         await createSession()
       })
       
+      const slides = [
+        createMockSlide({ id: 'slide-1', index: 0 }),
+        createMockSlide({ id: 'slide-2', index: 1 }),
+        createMockSlide({ id: 'slide-3', index: 2 }),
+      ]
+      
       act(() => {
-        setSlides([
-          createMockSlide({ id: 'slide-1', index: 0 }),
-          createMockSlide({ id: 'slide-2', index: 1 }),
-          createMockSlide({ id: 'slide-3', index: 2 }),
-        ])
+        setSlides(slides)
+        // Also sync to slideStore since setCurrentSlide delegates there
+        useSlideStore.getState().setSlides(slides)
       })
       
       act(() => {
@@ -190,12 +196,16 @@ describe('Integration Tests', () => {
         await createSession()
       })
       
+      const slides = [
+        createMockSlide({ id: 'slide-1', index: 0 }),
+        createMockSlide({ id: 'slide-2', index: 1 }),
+        createMockSlide({ id: 'slide-3', index: 2 }),
+      ]
+      
       act(() => {
-        setSlides([
-          createMockSlide({ id: 'slide-1', index: 0 }),
-          createMockSlide({ id: 'slide-2', index: 1 }),
-          createMockSlide({ id: 'slide-3', index: 2 }),
-        ])
+        setSlides(slides)
+        // Also sync to slideStore since navigation delegates there
+        useSlideStore.getState().setSlides(slides)
       })
       
       expect(useSessionStore.getState().session?.currentSlideIndex).toBe(0)
@@ -248,11 +258,14 @@ describe('Integration Tests', () => {
         await createSession()
       })
       
+      const slides = [
+        createMockSlide({ id: 'slide-1', index: 0 }),
+        createMockSlide({ id: 'slide-2', index: 1 }),
+      ]
+      
       act(() => {
-        setSlides([
-          createMockSlide({ id: 'slide-1', index: 0 }),
-          createMockSlide({ id: 'slide-2', index: 1 }),
-        ])
+        setSlides(slides)
+        useSlideStore.getState().setSlides(slides)
       })
       
       act(() => {
@@ -473,12 +486,14 @@ describe('Integration Tests', () => {
       })
       
       // 2. Add slides (simulating PDF import)
+      const slides = [
+        createMockSlide({ id: 'slide-1', index: 0, extractedText: 'What is an Algorithm?' }),
+        createMockSlide({ id: 'slide-2', index: 1, extractedText: 'Time Complexity' }),
+        createMockSlide({ id: 'slide-3', index: 2, extractedText: 'Space Complexity' }),
+      ]
       act(() => {
-        useSessionStore.getState().setSlides([
-          createMockSlide({ id: 'slide-1', index: 0, extractedText: 'What is an Algorithm?' }),
-          createMockSlide({ id: 'slide-2', index: 1, extractedText: 'Time Complexity' }),
-          createMockSlide({ id: 'slide-3', index: 2, extractedText: 'Space Complexity' }),
-        ])
+        useSessionStore.getState().setSlides(slides)
+        useSlideStore.getState().setSlides(slides)
       })
       
       // 3. Start recording

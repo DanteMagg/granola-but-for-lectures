@@ -48,6 +48,7 @@ export function useLocalAI(): UseLocalAIReturn {
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null)
   const unsubscribeProgressRef = useRef<(() => void) | null>(null)
   const unsubscribeChunkRef = useRef<(() => void) | null>(null)
+  const progressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Get context from current slide
   const getSlideContext = useCallback(() => {
@@ -97,7 +98,8 @@ export function useLocalAI(): UseLocalAIReturn {
         setDownloadProgress(progress)
         if (progress.percent >= 100) {
           // Clear progress after completion
-          setTimeout(() => setDownloadProgress(null), 1000)
+          if (progressTimeoutRef.current) clearTimeout(progressTimeoutRef.current)
+          progressTimeoutRef.current = setTimeout(() => setDownloadProgress(null), 1000)
           refreshModelInfo()
         }
       })
@@ -109,6 +111,9 @@ export function useLocalAI(): UseLocalAIReturn {
       }
       if (unsubscribeChunkRef.current) {
         unsubscribeChunkRef.current()
+      }
+      if (progressTimeoutRef.current) {
+        clearTimeout(progressTimeoutRef.current)
       }
     }
   }, [refreshModelInfo])

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSessionStore } from './stores/sessionStore'
 import { Sidebar } from './components/Sidebar'
 import { SlideViewer } from './components/SlideViewer'
@@ -42,6 +42,18 @@ export default function App() {
   const { importPdf, isImporting } = usePdfImport()
   const { showOnboarding, completeOnboarding } = useOnboarding()
 
+  // Refs for keyboard shortcuts to avoid re-registering handlers on every state change
+  const sessionRef = useRef(session)
+  const uiRef = useRef(ui)
+  const isSavingRef = useRef(isSaving)
+  const isImportingRef = useRef(isImporting)
+  
+  // Keep refs in sync with state
+  useEffect(() => { sessionRef.current = session }, [session])
+  useEffect(() => { uiRef.current = ui }, [ui])
+  useEffect(() => { isSavingRef.current = isSaving }, [isSaving])
+  useEffect(() => { isImportingRef.current = isImporting }, [isImporting])
+
   // Initialize app
   useEffect(() => {
     refreshSessionList().then(() => setIsReady(true))
@@ -70,28 +82,32 @@ export default function App() {
     return false
   }, [])
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts - uses refs to avoid re-registering on every state change
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Read current values from refs
+      const currentSession = sessionRef.current
+      const currentUI = uiRef.current
+
       // Handle Escape key globally (close modals)
       if (e.key === 'Escape') {
-        if (ui.showSearchModal) {
+        if (currentUI.showSearchModal) {
           setUIState({ showSearchModal: false })
           return
         }
-        if (ui.showAIChat) {
+        if (currentUI.showAIChat) {
           setUIState({ showAIChat: false })
           return
         }
-        if (ui.showExportModal) {
+        if (currentUI.showExportModal) {
           setUIState({ showExportModal: false })
           return
         }
-        if (ui.showSettingsModal) {
+        if (currentUI.showSettingsModal) {
           setUIState({ showSettingsModal: false })
           return
         }
-        if (ui.showShortcutsHelp) {
+        if (currentUI.showShortcutsHelp) {
           setUIState({ showShortcutsHelp: false })
           return
         }
@@ -109,7 +125,7 @@ export default function App() {
       // Meta+S - Save
       if (isMod && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        if (session && !isSaving) {
+        if (currentSession && !isSavingRef.current) {
           saveSession()
           toast.shortcut('Saved', '⌘S')
         }
@@ -119,7 +135,7 @@ export default function App() {
       // Meta+E - Export
       if (isMod && e.key.toLowerCase() === 'e') {
         e.preventDefault()
-        if (session) {
+        if (currentSession) {
           setUIState({ showExportModal: true })
           toast.shortcut('Export', '⌘E')
         }
@@ -129,7 +145,7 @@ export default function App() {
       // Meta+O - Import PDF
       if (isMod && e.key.toLowerCase() === 'o') {
         e.preventDefault()
-        if (!isImporting) {
+        if (!isImportingRef.current) {
           importPdf()
           toast.shortcut('Import PDF', '⌘O')
         }
@@ -139,7 +155,7 @@ export default function App() {
       // Meta+K or Meta+F - Search
       if (isMod && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'f')) {
         e.preventDefault()
-        if (session) {
+        if (currentSession) {
           setUIState({ showSearchModal: true })
         }
         return
@@ -163,7 +179,7 @@ export default function App() {
       // Meta+\ - Toggle sidebar
       if (isMod && e.key === '\\') {
         e.preventDefault()
-        setUIState({ sidebarCollapsed: !ui.sidebarCollapsed })
+        setUIState({ sidebarCollapsed: !currentUI.sidebarCollapsed })
         return
       }
 
@@ -173,37 +189,37 @@ export default function App() {
       // Single key shortcuts (without modifiers)
       switch (e.key) {
         case SHORTCUTS.NEXT_SLIDE:
-          if (session && session.slides.length > 0) {
+          if (currentSession && currentSession.slides.length > 0) {
             nextSlide()
           }
           break
 
         case SHORTCUTS.PREV_SLIDE:
-          if (session && session.slides.length > 0) {
+          if (currentSession && currentSession.slides.length > 0) {
             prevSlide()
           }
           break
 
         case SHORTCUTS.TOGGLE_RECORDING:
         case SHORTCUTS.TOGGLE_RECORDING.toUpperCase():
-          if (session && session.slides.length > 0) {
+          if (currentSession && currentSession.slides.length > 0) {
             // Dispatch custom event that AudioRecorder listens to
             window.dispatchEvent(new CustomEvent(RECORDING_TOGGLE_EVENT))
-            toast.shortcut(session.isRecording ? 'Stop Recording' : 'Start Recording', 'R')
+            toast.shortcut(currentSession.isRecording ? 'Stop Recording' : 'Start Recording', 'R')
           }
           break
 
         case SHORTCUTS.TOGGLE_AI_CHAT:
         case SHORTCUTS.TOGGLE_AI_CHAT.toUpperCase():
-          if (session) {
-            setUIState({ showAIChat: !ui.showAIChat })
-            toast.shortcut(ui.showAIChat ? 'Close AI Chat' : 'Open AI Chat', 'A')
+          if (currentSession) {
+            setUIState({ showAIChat: !currentUI.showAIChat })
+            toast.shortcut(currentUI.showAIChat ? 'Close AI Chat' : 'Open AI Chat', 'A')
           }
           break
 
         case SHORTCUTS.FOCUS_NOTES:
         case SHORTCUTS.FOCUS_NOTES.toUpperCase():
-          if (session) {
+          if (currentSession) {
             const notesEditor = document.querySelector('.ProseMirror') as HTMLElement
             if (notesEditor) {
               notesEditor.focus()
@@ -227,19 +243,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    session, 
-    ui, 
-    setUIState, 
-    nextSlide, 
-    prevSlide, 
-    saveSession,
-    isSaving,
-    importPdf,
-    isImporting,
-    isTyping,
-    createSession,
-  ])
+  }, [setUIState, nextSlide, prevSlide, saveSession, importPdf, isTyping, createSession])
 
   if (!isReady) {
     return (

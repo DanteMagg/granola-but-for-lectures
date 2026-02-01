@@ -8,7 +8,7 @@ import type { AIMessage, AIConversation } from '@shared/types'
 // Mock the store
 vi.mock('../../renderer/stores/sessionStore')
 
-const mockUseSessionStore = vi.mocked(useSessionStore)
+const mockUseSessionStore = vi.mocked(useSessionStore) as any
 
 describe('AIChatModal', () => {
   const mockSetUIState = vi.fn()
@@ -50,13 +50,18 @@ describe('AIChatModal', () => {
       ...overrides,
     })
 
-    mockUseSessionStore.mockReturnValue({
+    const storeReturnValue = {
       session,
       ui: createMockUIState({ showAIChat: true, aiChatContext: 'current-slide', ...overrides.ui }),
       setUIState: mockSetUIState,
       addAIMessage: mockAddAIMessage,
       updateAIMessage: mockUpdateAIMessage,
-    } as any)
+    }
+    
+    mockUseSessionStore.mockReturnValue(storeReturnValue as any)
+    
+    // Also mock getState for direct store access
+    mockUseSessionStore.getState = vi.fn().mockReturnValue(storeReturnValue)
 
     return session
   }

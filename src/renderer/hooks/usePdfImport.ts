@@ -72,64 +72,90 @@ export function usePdfImport() {
     }
 
     const slides: Slide[] = []
+    let failedPages = 0
 
-    // Process each page
+    // Process each page with individual error handling
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       setProgress((pageNum / numPages) * 100)
 
-      const page = await pdf.getPage(pageNum)
+      try {
+        const page = await pdf.getPage(pageNum)
 
-      // Get page dimensions
-      const viewport = page.getViewport({ scale: 2.0 }) // Higher scale for better quality
+        // Get page dimensions
+        const viewport = page.getViewport({ scale: 2.0 }) // Higher scale for better quality
 
-      // Create canvas for rendering
-      const canvas = document.createElement('canvas')
-      const context = canvas.getContext('2d')
+        // Create canvas for rendering
+        const canvas = document.createElement('canvas')
+        const context = canvas.getContext('2d')
 
-      if (!context) {
-        throw new Error(
-          `Failed to create canvas context for page ${pageNum}`
-        )
+        if (!context) {
+          throw new Error('Failed to create canvas context')
+        }
+
+        canvas.width = viewport.width
+        canvas.height = viewport.height
+
+        // Render page to canvas
+        await page.render({
+          canvasContext: context,
+          viewport: viewport,
+        }).promise
+
+        // Convert to base64 PNG
+        const imageData = canvas.toDataURL('image/png').split(',')[1]
+
+        // Extract text content
+        const textContent = await page.getTextContent()
+        const extractedText = textContent.items
+          .filter((item): item is TextItem => 'str' in item)
+          .map(item => item.str)
+          .join(' ')
+          .trim()
+
+        slides.push({
+          id: uuidv4(),
+          index: pageNum - 1,
+          imageData,
+          width: viewport.width,
+          height: viewport.height,
+          extractedText,
+        })
+      } catch (pageError) {
+        // Log error but continue with other pages
+        log.warn(`Failed to process page ${pageNum}`, pageError)
+        failedPages++
+        
+        // Add placeholder slide so indexing stays consistent
+        slides.push({
+          id: uuidv4(),
+          index: pageNum - 1,
+          imageData: '', // Empty placeholder
+          width: 800,
+          height: 600,
+          extractedText: `[Page ${pageNum} failed to load]`,
+        })
       }
+    }
 
-      canvas.width = viewport.width
-      canvas.height = viewport.height
-
-      // Render page to canvas
-      await page.render({
-        canvasContext: context,
-        viewport: viewport,
-      }).promise
-
-      // Convert to base64 PNG
-      const imageData = canvas.toDataURL('image/png').split(',')[1]
-
-      // Extract text content
-      const textContent = await page.getTextContent()
-      const extractedText = textContent.items
-        .filter((item): item is TextItem => 'str' in item)
-        .map(item => item.str)
-        .join(' ')
-        .trim()
-
-      slides.push({
-        id: uuidv4(),
-        index: pageNum - 1,
-        imageData,
-        width: viewport.width,
-        height: viewport.height,
-        extractedText,
-      })
+    if (failedPages > 0) {
+      log.warn(`PDF import completed with ${failedPages} failed pages`)
     }
 
     setSlides(slides)
     setProgress(100)
     
-    toast.success('PDF Imported', `${numPages} slides loaded from ${fileName}`)
+    if (failedPages > 0) {
+      toast.warning('PDF Imported with Issues', `${numPages - failedPages} of ${numPages} slides loaded. ${failedPages} page(s) failed.`)
+    } else {
+      toast.success('PDF Imported', `${numPages} slides loaded from ${fileName}`)
+    }
   }, [session?.name, setSlides, setPdfFileName, setSessionName])
 
   // Import via file dialog
   const importPdf = useCallback(async () => {
+    // Guard against double-trigger from rapid keyboard/click spam
+    if (isImporting) return
+    
     setIsImporting(true)
     setProgress(0)
     setError(null)
@@ -157,10 +183,13 @@ export function usePdfImport() {
     } finally {
       setIsImporting(false)
     }
-  }, [processPdfData])
+  }, [isImporting, processPdfData])
 
   // Import from File object (for drag & drop)
   const importPdfFromFile = useCallback(async (file: File) => {
+    // Guard against concurrent imports
+    if (isImporting) return false
+    
     // Validate file type
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       const errorMsg = 'Please drop a PDF file'
@@ -198,7 +227,7 @@ export function usePdfImport() {
     } finally {
       setIsImporting(false)
     }
-  }, [processPdfData])
+  }, [isImporting, processPdfData])
 
   return {
     importPdf,

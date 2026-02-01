@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
+import DOMPurify from 'dompurify'
 import { useSessionStore } from '../stores/sessionStore'
 import { 
   Bold, Italic, List, ListOrdered, Undo, Redo, Check, 
@@ -293,7 +294,7 @@ export function NotesPanel() {
                 <div 
                   className="enhanced-notes-content"
                   dangerouslySetInnerHTML={{ 
-                    __html: formatMarkdownToHtml(currentEnhancedNote.content) 
+                    __html: DOMPurify.sanitize(formatMarkdownToHtml(currentEnhancedNote.content))
                   }}
                 />
               </div>

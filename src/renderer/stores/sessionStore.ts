@@ -14,6 +14,12 @@ import type {
 import { AUTOSAVE_INTERVAL_MS, UI_DEFAULTS } from '@shared/constants'
 import { createLogger } from '../lib/logger'
 import { validateSession, migrateSession, CURRENT_SCHEMA_VERSION } from '../lib/sessionValidator'
+import { sessionError } from '../lib/errorHandler'
+import { useSlideStore } from './slideStore'
+import { useNotesStore } from './notesStore'
+import { useTranscriptStore } from './transcriptStore'
+import { useAIStore } from './aiStore'
+import { useUIStore } from './uiStore'
 
 const log = createLogger('sessionStore')
 
@@ -35,7 +41,7 @@ interface SessionStore {
     slideCount: number
   }>
 
-  // UI state
+  // UI state (delegated to uiStore, kept for backwards compatibility)
   ui: UIState
 
   // Loading states
@@ -53,16 +59,16 @@ interface SessionStore {
   deleteSession: (sessionId: string) => Promise<void>
   refreshSessionList: () => Promise<void>
 
-  // Slide actions
+  // Slide actions (delegated to slideStore)
   setSlides: (slides: Slide[]) => void
   setCurrentSlide: (index: number) => void
   nextSlide: () => void
   prevSlide: () => void
 
-  // Note actions
+  // Note actions (delegated to notesStore)
   updateNote: (slideId: string, content: string, plainText: string) => void
 
-  // Transcript actions
+  // Transcript actions (delegated to transcriptStore)
   addTranscriptSegment: (
     slideId: string,
     segment: Omit<TranscriptSegment, 'id' | 'slideId'>
@@ -75,11 +81,11 @@ interface SessionStore {
   // Session phase actions (Granola-style workflow)
   setSessionPhase: (phase: SessionPhase) => void
   
-  // Enhanced notes actions
+  // Enhanced notes actions (delegated to notesStore)
   setEnhancedNote: (slideId: string, note: EnhancedNote) => void
   updateEnhancedNoteStatus: (slideId: string, status: EnhancedNote['status'], error?: string) => void
 
-  // AI actions
+  // AI actions (delegated to aiStore)
   addAIMessage: (
     conversationId: string | null,
     message: Omit<AIMessage, 'id' | 'timestamp'>
@@ -90,7 +96,7 @@ interface SessionStore {
     content: string
   ) => void
 
-  // UI actions
+  // UI actions (delegated to uiStore)
   setUIState: (updates: Partial<UIState>) => void
 
   // Session metadata
@@ -100,6 +106,13 @@ interface SessionStore {
   // Feedback
   setFeedback: (rating: number, feedback: string) => Promise<void>
   addRecordingDuration: (duration: number) => void
+
+  // Cleanup
+  cleanup: () => void
+  
+  // Sync helpers for domain stores
+  syncToDomainStores: () => void
+  syncFromDomainStores: () => Session | null
 }
 
 const createEmptySession = (name?: string): Session => ({
@@ -148,9 +161,54 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   clearError: () => set({ error: null }),
 
+  // Sync session data to domain stores
+  syncToDomainStores: () => {
+    const { session } = get()
+    if (!session) {
+      // Reset all domain stores
+      useSlideStore.getState().reset()
+      useNotesStore.getState().reset()
+      useTranscriptStore.getState().reset()
+      useAIStore.getState().reset()
+      return
+    }
+    
+    // Sync to domain stores
+    useSlideStore.getState().setSlides(session.slides)
+    useSlideStore.setState({ currentSlideIndex: session.currentSlideIndex })
+    useNotesStore.getState().setNotes(session.notes)
+    useNotesStore.getState().setEnhancedNotes(session.enhancedNotes)
+    useTranscriptStore.getState().setTranscripts(session.transcripts)
+    useAIStore.getState().setConversations(session.aiConversations, session.id)
+  },
+
+  // Sync from domain stores back to session
+  syncFromDomainStores: () => {
+    const { session } = get()
+    if (!session) return null
+    
+    const slideState = useSlideStore.getState()
+    const notesState = useNotesStore.getState()
+    const transcriptState = useTranscriptStore.getState()
+    const aiState = useAIStore.getState()
+    
+    return {
+      ...session,
+      slides: slideState.slides,
+      currentSlideIndex: slideState.currentSlideIndex,
+      notes: notesState.notes,
+      enhancedNotes: notesState.enhancedNotes,
+      transcripts: transcriptState.transcripts,
+      aiConversations: aiState.conversations,
+    }
+  },
+
   createSession: async (name?: string) => {
     const session = createEmptySession(name)
     set({ session, isLoading: false, error: null })
+    
+    // Sync to domain stores
+    get().syncToDomainStores()
 
     // Save immediately
     await get().saveSession()
@@ -191,6 +249,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         }
         
         set({ session, isLoading: false })
+        
+        // Sync to domain stores
+        get().syncToDomainStores()
       } else {
         set({
           isLoading: false,
@@ -198,23 +259,29 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         })
       }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to load session'
-      log.error('Failed to load session', error)
-      set({ isLoading: false, error: { message, type: 'load' } })
+      const result = sessionError(error, 'load', { severity: 'high' })
+      set({ isLoading: false, error: { message: result.message, type: 'load' } })
     }
   },
 
   saveSession: async () => {
-    const { session, isSaving } = get()
+    const { session, isSaving, syncFromDomainStores } = get()
     if (!session) return
+
+    // Capture the current session's updatedAt to detect if data changed during pending save
+    const sessionAtCallTime = session.updatedAt
 
     // If a save is already in progress, wait for it to complete
     if (isSaving && saveInProgress) {
       try {
         await saveInProgress
-        // Previous save succeeded, no need to save again
-        return
+        // Check if session changed while we were waiting - if so, need to save again
+        const currentSession = get().session
+        if (currentSession && currentSession.updatedAt === sessionAtCallTime) {
+          // Session hasn't changed since this save was requested, skip
+          return
+        }
+        // Session changed while waiting, continue with new save
       } catch {
         // Previous save failed, continue with this one
       }
@@ -224,8 +291,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     saveInProgress = (async () => {
       try {
+        // Sync from domain stores to get latest data
+        const syncedSession = syncFromDomainStores()
+        const sessionToSave = syncedSession || session
+        
         const updatedSession = {
-          ...session,
+          ...sessionToSave,
           updatedAt: new Date().toISOString(),
         }
 
@@ -243,10 +314,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         )
         set({ session: updatedSession, isSaving: false, error: null })
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Failed to save session'
-        log.error('Failed to save session', error)
-        set({ isSaving: false, error: { message, type: 'save' } })
+        const result = sessionError(error, 'save', { severity: 'medium' })
+        set({ isSaving: false, error: { message: result.message, type: 'save' } })
         throw error // Re-throw for internal queue handling
       } finally {
         saveInProgress = null
@@ -275,10 +344,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
       await get().refreshSessionList()
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to delete session'
-      log.error('Failed to delete session', error)
-      set({ error: { message, type: 'delete' } })
+      const result = sessionError(error, 'delete', { severity: 'medium' })
+      set({ error: { message: result.message, type: 'delete' } })
     }
   },
 
@@ -287,16 +354,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const sessions = await window.electronAPI.listSessions()
       set({ sessionList: sessions })
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Failed to refresh session list'
-      log.error('Failed to refresh session list', error)
-      set({ error: { message, type: 'list' } })
+      const result = sessionError(error, 'list', { severity: 'low' })
+      set({ error: { message: result.message, type: 'list' } })
     }
   },
 
   setSlides: (slides: Slide[]) => {
+    // Update domain store
+    useSlideStore.getState().setSlides(slides)
+    
+    // Update session
     set(state => ({
       session: state.session
         ? {
@@ -312,76 +379,69 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   setCurrentSlide: (index: number) => {
+    const { session } = get()
+    if (!session) return
+    
+    const now = Date.now()
+    const slideStore = useSlideStore.getState()
+    
+    // Track slide timing during recording
+    if (session.isRecording) {
+      slideStore.markSlideLeft(session.currentSlideIndex, now)
+      slideStore.markSlideViewed(index, now)
+    }
+    
+    // Update domain store
+    slideStore.setCurrentSlide(index)
+    
+    // Get fresh state after the update (zustand returns immutable state)
+    const updatedSlideStore = useSlideStore.getState()
+    
+    // Sync back to session
     set(state => {
       if (!state.session) return state
-      const maxIndex = state.session.slides.length - 1
-      const validIndex = Math.max(0, Math.min(index, maxIndex))
-      const now = Date.now()
-      
-      // Track slide timing during recording (for transcript-slide association)
-      const updatedSlides = state.session.slides.map((slide, i) => {
-        if (state.session!.isRecording) {
-          // Mark current slide as viewed until now
-          if (i === state.session!.currentSlideIndex && !slide.viewedUntil) {
-            return { ...slide, viewedUntil: now }
-          }
-          // Mark new slide as started viewing now
-          if (i === validIndex && !slide.viewedAt) {
-            return { ...slide, viewedAt: now }
-          }
-        }
-        return slide
-      })
-
       return {
         session: {
           ...state.session,
-          slides: updatedSlides,
-          currentSlideIndex: validIndex,
+          slides: updatedSlideStore.slides,
+          currentSlideIndex: updatedSlideStore.currentSlideIndex,
         },
       }
     })
   },
 
   nextSlide: () => {
-    const { session, setCurrentSlide } = get()
-    if (session && session.currentSlideIndex < session.slides.length - 1) {
-      setCurrentSlide(session.currentSlideIndex + 1)
-    }
+    useSlideStore.getState().nextSlide()
+    const slideStore = useSlideStore.getState()
+    set(state => ({
+      session: state.session
+        ? { ...state.session, currentSlideIndex: slideStore.currentSlideIndex }
+        : null,
+    }))
   },
 
   prevSlide: () => {
-    const { session, setCurrentSlide } = get()
-    if (session && session.currentSlideIndex > 0) {
-      setCurrentSlide(session.currentSlideIndex - 1)
-    }
+    useSlideStore.getState().prevSlide()
+    const slideStore = useSlideStore.getState()
+    set(state => ({
+      session: state.session
+        ? { ...state.session, currentSlideIndex: slideStore.currentSlideIndex }
+        : null,
+    }))
   },
 
   updateNote: (slideId: string, content: string, plainText: string) => {
+    // Update domain store
+    useNotesStore.getState().updateNote(slideId, content, plainText)
+    
+    // Sync to session
+    const notesState = useNotesStore.getState()
     set(state => {
       if (!state.session) return state
-
-      const existingNote = state.session.notes[slideId]
-      const now = new Date().toISOString()
-
-      const note: Note = existingNote
-        ? { ...existingNote, content, plainText, updatedAt: now }
-        : {
-            id: uuidv4(),
-            slideId,
-            content,
-            plainText,
-            createdAt: now,
-            updatedAt: now,
-          }
-
       return {
         session: {
           ...state.session,
-          notes: {
-            ...state.session.notes,
-            [slideId]: note,
-          },
+          notes: notesState.notes,
         },
       }
     })
@@ -394,24 +454,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     slideId: string,
     segment: Omit<TranscriptSegment, 'id' | 'slideId'>
   ) => {
+    // Update domain store
+    useTranscriptStore.getState().addTranscriptSegment(slideId, segment)
+    
+    // Sync to session
+    const transcriptState = useTranscriptStore.getState()
     set(state => {
       if (!state.session) return state
-
-      const fullSegment: TranscriptSegment = {
-        ...segment,
-        id: uuidv4(),
-        slideId,
-      }
-
-      const existingSegments = state.session.transcripts[slideId] || []
-
       return {
         session: {
           ...state.session,
-          transcripts: {
-            ...state.session.transcripts,
-            [slideId]: [...existingSegments, fullSegment],
-          },
+          transcripts: transcriptState.transcripts,
         },
       }
     })
@@ -467,15 +520,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   setEnhancedNote: (slideId: string, note: EnhancedNote) => {
+    // Update domain store
+    useNotesStore.getState().setEnhancedNote(slideId, note)
+    
+    // Sync to session
+    const notesState = useNotesStore.getState()
     set(state => {
       if (!state.session) return state
       return {
         session: {
           ...state.session,
-          enhancedNotes: {
-            ...state.session.enhancedNotes,
-            [slideId]: note,
-          },
+          enhancedNotes: notesState.enhancedNotes,
         },
       }
     })
@@ -483,22 +538,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   updateEnhancedNoteStatus: (slideId: string, status: EnhancedNote['status'], error?: string) => {
+    // Update domain store
+    useNotesStore.getState().updateEnhancedNoteStatus(slideId, status, error)
+    
+    // Sync to session
+    const notesState = useNotesStore.getState()
     set(state => {
       if (!state.session) return state
-      const existingNote = state.session.enhancedNotes[slideId]
-      if (!existingNote) return state
-      
       return {
         session: {
           ...state.session,
-          enhancedNotes: {
-            ...state.session.enhancedNotes,
-            [slideId]: {
-              ...existingNote,
-              status,
-              error,
-            },
-          },
+          enhancedNotes: notesState.enhancedNotes,
         },
       }
     })
@@ -509,35 +559,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     conversationId: string | null,
     message: Omit<AIMessage, 'id' | 'timestamp'>
   ) => {
-    const fullMessage: AIMessage = {
-      ...message,
-      id: uuidv4(),
-      timestamp: new Date().toISOString(),
-    }
-
+    // Update domain store
+    const { messageId, conversationId: newConvId } = useAIStore.getState().addMessage(conversationId, message)
+    
+    // Sync to session
+    const aiState = useAIStore.getState()
     set(state => {
       if (!state.session) return state
-
-      let conversations = [...state.session.aiConversations]
-
-      if (conversationId) {
-        // Add to existing conversation
-        conversations = conversations.map(conv =>
-          conv.id === conversationId
-            ? { ...conv, messages: [...conv.messages, fullMessage] }
-            : conv
-        )
-      } else {
-        // Create new conversation
-        const newConversation: AIConversation = {
-          id: uuidv4(),
-          sessionId: state.session.id,
-          messages: [fullMessage],
-          createdAt: new Date().toISOString(),
-        }
-        conversations.push(newConversation)
-      }
-
+      
+      // Update session ID on conversations
+      const conversations = aiState.conversations.map(c => ({
+        ...c,
+        sessionId: state.session!.id,
+      }))
+      
       return {
         session: {
           ...state.session,
@@ -549,7 +584,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // Trigger autosave
     scheduleAutosave(get)
 
-    return fullMessage.id
+    return messageId
   },
 
   updateAIMessage: (
@@ -557,32 +592,29 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     messageId: string,
     content: string
   ) => {
+    // Update domain store
+    if (conversationId) {
+      useAIStore.getState().updateMessage(conversationId, messageId, content)
+    }
+    
+    // Sync to session
+    const aiState = useAIStore.getState()
     set(state => {
       if (!state.session) return state
-
-      const conversations = state.session.aiConversations.map(conv => {
-        // Find the conversation containing this message
-        const hasMessage = conv.messages.some(m => m.id === messageId)
-        if (!hasMessage && conv.id !== conversationId) return conv
-
-        return {
-          ...conv,
-          messages: conv.messages.map(m =>
-            m.id === messageId ? { ...m, content } : m
-          ),
-        }
-      })
-
       return {
         session: {
           ...state.session,
-          aiConversations: conversations,
+          aiConversations: aiState.conversations,
         },
       }
     })
   },
 
   setUIState: (updates: Partial<UIState>) => {
+    // Update domain store (persisted)
+    useUIStore.getState().setUIState(updates)
+    
+    // Keep local copy in sync for backwards compatibility
     set(state => ({
       ui: {
         ...state.ui,
@@ -648,6 +680,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }))
     // Trigger autosave to persist recording duration
     scheduleAutosave(get)
+  },
+
+  cleanup: () => {
+    // Clear pending autosave timer to prevent memory leaks and stale saves
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer)
+      autosaveTimer = null
+    }
+    // Clear any pending save promise
+    saveInProgress = null
   },
 }))
 

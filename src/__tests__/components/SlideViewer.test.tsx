@@ -66,8 +66,8 @@ describe('SlideViewer', () => {
       
       render(<SlideViewer />)
       
-      // Should show current slide image
-      const slideImage = screen.getByAltText('Slide 1')
+      // Should show current slide image (alt text includes extracted text)
+      const slideImage = screen.getByAltText(/Slide 1 of 5/)
       expect(slideImage).toBeInTheDocument()
       expect(slideImage).toHaveAttribute('src', 'data:image/png;base64,base64-image-data-0')
     })
@@ -161,8 +161,8 @@ describe('SlideViewer', () => {
       
       const { rerender } = render(<SlideViewer />)
       
-      // Initially showing slide 1
-      expect(screen.getByAltText('Slide 1')).toHaveAttribute(
+      // Initially showing slide 1 (alt text includes "of X" and extracted text)
+      expect(screen.getByAltText(/Slide 1 of 5/)).toHaveAttribute(
         'src',
         'data:image/png;base64,base64-image-data-0'
       )
@@ -177,7 +177,7 @@ describe('SlideViewer', () => {
       
       rerender(<SlideViewer />)
       
-      expect(screen.getByAltText('Slide 3')).toHaveAttribute(
+      expect(screen.getByAltText(/Slide 3 of 5/)).toHaveAttribute(
         'src',
         'data:image/png;base64,base64-image-data-2'
       )

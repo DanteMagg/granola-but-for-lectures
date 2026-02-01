@@ -1,6 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import DOMPurify from 'dompurify'
 import { useSessionStore } from '../stores/sessionStore'
+import { createLogger } from '../lib/logger'
 import { X, Send, Sparkles, ChevronDown, Copy, Check, Square, Settings, AlertCircle, Lightbulb, HelpCircle, BookOpen } from 'lucide-react'
+
+const log = createLogger('aiChat')
 import { clsx } from 'clsx'
 import { AI_CONFIG } from '@shared/constants'
 import {
@@ -59,6 +63,8 @@ export function AIChatModal() {
   const abortRef = useRef<boolean>(false)
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const focusTrapRef = useFocusTrap<HTMLDivElement>(true)
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const settingsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Get current conversation or messages from all conversations
   const currentConversation = session?.aiConversations[session.aiConversations.length - 1]
@@ -79,11 +85,17 @@ export function AIChatModal() {
     inputRef.current?.focus()
   }, [])
 
-  // Cleanup streaming listener on unmount
+  // Cleanup streaming listener and timeouts on unmount
   useEffect(() => {
     return () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current()
+      }
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current)
+      }
+      if (settingsTimeoutRef.current) {
+        clearTimeout(settingsTimeoutRef.current)
       }
     }
   }, [])
@@ -114,7 +126,7 @@ export function AIChatModal() {
   const handleOpenSettings = () => {
     setUIState({ showAIChat: false })
     // A small delay to allow the modal to close before opening settings
-    setTimeout(() => {
+    settingsTimeoutRef.current = setTimeout(() => {
       // Trigger settings modal - this assumes there's a way to open it
       // For now, we'll just close this modal
       document.dispatchEvent(new CustomEvent('open-settings', { detail: { tab: 'models' } }))
@@ -212,9 +224,10 @@ export function AIChatModal() {
     try {
       await navigator.clipboard.writeText(content)
       setCopiedId(messageId)
-      setTimeout(() => setCopiedId(null), 2000)
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
+      copyTimeoutRef.current = setTimeout(() => setCopiedId(null), 2000)
     } catch (err) {
-      console.error('Failed to copy:', err)
+      log.error('Failed to copy', err)
     }
   }
 
@@ -266,8 +279,9 @@ export function AIChatModal() {
           content: '',
         })
         
-        // Get the actual message ID after it was added
-        const updatedConversation = session.aiConversations[session.aiConversations.length - 1]
+        // Get the actual message ID after it was added - read fresh from store to avoid stale closure
+        const freshSession = useSessionStore.getState().session
+        const updatedConversation = freshSession?.aiConversations[freshSession.aiConversations.length - 1]
         const lastMessage = updatedConversation?.messages[updatedConversation.messages.length - 1]
         const messageId = lastMessage?.id || tempMessageId
         setStreamingMessageId(messageId)
@@ -278,9 +292,11 @@ export function AIChatModal() {
         unsubscribeRef.current = window.electronAPI.onLLMChunk((chunk: string) => {
           if (abortRef.current) return
           fullResponse += chunk
-          // Update the message content progressively
+          // Update the message content progressively - use fresh state to avoid stale closure
           if (updateAIMessage) {
-            updateAIMessage(conversationId || session.aiConversations[session.aiConversations.length - 1]?.id, messageId, fullResponse)
+            const currentSession = useSessionStore.getState().session
+            const convId = conversationId ?? currentSession?.aiConversations[currentSession.aiConversations.length - 1]?.id ?? null
+            updateAIMessage(convId, messageId, fullResponse)
           }
         })
 
@@ -299,7 +315,9 @@ export function AIChatModal() {
           // If streaming didn't produce content, use the final response
           if (!fullResponse && response.text) {
             if (updateAIMessage) {
-              updateAIMessage(conversationId || session.aiConversations[session.aiConversations.length - 1]?.id, messageId, response.text)
+              const currentSession = useSessionStore.getState().session
+              const convId = conversationId ?? currentSession?.aiConversations[currentSession.aiConversations.length - 1]?.id ?? null
+              updateAIMessage(convId, messageId, response.text)
             }
           }
         } finally {
@@ -322,17 +340,19 @@ export function AIChatModal() {
 
         if (abortRef.current) return
 
-        addAIMessage(conversationId || session.aiConversations[session.aiConversations.length - 1]?.id, {
+        const currentSession = useSessionStore.getState().session
+        addAIMessage(conversationId ?? currentSession?.aiConversations[currentSession.aiConversations.length - 1]?.id ?? null, {
           role: 'assistant',
           content: response.text,
         })
       }
     } catch (err) {
-      console.error('LLM generation error:', err)
+      log.error('LLM generation error', err)
       
       const errorMessage = err instanceof Error ? err.message : 'An error occurred'
       
-      addAIMessage(conversationId || session.aiConversations[session.aiConversations.length - 1]?.id, {
+      const errSession = useSessionStore.getState().session
+      addAIMessage(conversationId ?? errSession?.aiConversations[errSession.aiConversations.length - 1]?.id ?? null, {
         role: 'assistant',
         content: `**Error generating response:** ${errorMessage}\n\nPlease check that the AI model is properly loaded in Settings.`,
       })
@@ -354,7 +374,7 @@ export function AIChatModal() {
   }
 
   const handleQuickAction = (action: typeof QUICK_ACTIONS[number]) => {
-    if (isLoading) return
+    if (isLoading || !session) return
     sendMessage(action.prompt, action.context)
   }
 
@@ -383,12 +403,19 @@ export function AIChatModal() {
         )
       }
       
-      // Process inline formatting
+      // Process inline formatting with HTML escaping for security
       return (
         <span key={i}>
           {part.split('\n').map((line, j) => {
+            // Escape HTML first to prevent XSS
+            let processedLine = line
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#039;')
             // Bold
-            let processedLine = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            processedLine = processedLine.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             // Italic
             processedLine = processedLine.replace(/\*(.*?)\*/g, '<em>$1</em>')
             // Inline code
@@ -396,7 +423,7 @@ export function AIChatModal() {
             
             return (
               <span key={j}>
-                <span dangerouslySetInnerHTML={{ __html: processedLine }} />
+                <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(processedLine) }} />
                 {j < part.split('\n').length - 1 && <br />}
               </span>
             )

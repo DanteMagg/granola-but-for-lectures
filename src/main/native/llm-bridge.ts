@@ -6,9 +6,11 @@ import * as https from 'https'
 import * as http from 'http'
 import * as crypto from 'crypto'
 import { log } from '../logger.js'
+import { WorkerManager } from '../workers/worker-manager.js'
+import { validateLLMRequest, ALLOWED_LLM_MODELS, validateModelName } from '../security.js'
 
 // Local LLM integration bridge
-// Uses node-llama-cpp for actual inference
+// Uses worker thread for CPU-intensive inference to prevent blocking IPC
 
 /**
  * Verify file integrity using SHA256 hash
@@ -110,6 +112,8 @@ class LLMBridge {
   private context: any = null
   private session: any = null
   private downloadAbortController: AbortController | null = null
+  private workerManager: WorkerManager | null = null
+  private useWorker: boolean = true
 
   constructor() {
     const userDataPath = app.getPath('userData')
@@ -122,6 +126,34 @@ class LLMBridge {
       temperature: 0.7,
       maxTokens: 1024,
     }
+  }
+
+  /**
+   * Start the worker thread for background inference
+   */
+  private async startWorker(): Promise<boolean> {
+    if (this.workerManager?.ready) {
+      return true
+    }
+
+    try {
+      this.workerManager = new WorkerManager('./llm-worker.js', 'llm')
+      const started = await this.workerManager.start()
+      
+      if (started) {
+        // Initialize the worker with the model
+        const result = await this.workerManager.send<{ success: boolean }>('init', {
+          modelPath: this.config.modelPath,
+          modelName: this.config.modelName,
+          contextLength: this.config.contextLength,
+        })
+        return result.success
+      }
+    } catch (error) {
+      log.warn('Failed to start LLM worker, falling back to main thread', error, 'llm')
+      this.useWorker = false
+    }
+    return false
   }
 
   async initialize(): Promise<boolean> {
@@ -141,6 +173,17 @@ class LLMBridge {
       return false
     }
 
+    // Try to start worker thread first (non-blocking inference)
+    if (this.useWorker) {
+      const workerStarted = await this.startWorker()
+      if (workerStarted) {
+        this.isLoaded = true
+        log.info('LLM initialized with worker thread', { model: this.config.modelName }, 'llm')
+        return true
+      }
+    }
+
+    // Fallback to main thread (blocks IPC during inference)
     try {
       // Dynamic import of node-llama-cpp
       log.debug('Importing node-llama-cpp module', undefined, 'llm')
@@ -174,7 +217,7 @@ class LLMBridge {
         log.debug('Chat session created', undefined, 'llm')
         
         this.isLoaded = true
-        log.info('LLM initialized successfully', { model: this.config.modelName }, 'llm')
+        log.info('LLM initialized (main thread fallback)', { model: this.config.modelName }, 'llm')
         return true
       }
     } catch (error: any) {
@@ -190,14 +233,30 @@ class LLMBridge {
   }
 
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
-    if (!this.isLoaded || !this.session) {
+    if (!this.isLoaded) {
+      return this.fallbackGenerate(request)
+    }
+
+    // Use worker thread if available (non-blocking)
+    if (this.workerManager?.ready) {
+      try {
+        log.debug('Generating response in worker', { promptPreview: request.prompt.substring(0, 100) }, 'llm')
+        return await this.workerManager.send<GenerateResponse>('generate', request)
+      } catch (error) {
+        log.error('Worker generation failed, trying main thread', error, 'llm')
+        // Fall through to main thread
+      }
+    }
+
+    // Main thread fallback
+    if (!this.session) {
       return this.fallbackGenerate(request)
     }
 
     try {
       const prompt = this.buildPrompt(request)
 
-      log.debug('Generating response', { promptPreview: prompt.substring(0, 100) }, 'llm')
+      log.debug('Generating response (main thread)', { promptPreview: prompt.substring(0, 100) }, 'llm')
 
       const response = await this.session.prompt(prompt, {
         maxTokens: request.maxTokens || this.config.maxTokens,
@@ -223,7 +282,25 @@ class LLMBridge {
     request: GenerateRequest,
     onChunk: (chunk: string) => void
   ): Promise<GenerateResponse> {
-    if (!this.isLoaded || !this.session) {
+    if (!this.isLoaded) {
+      const fallback = this.fallbackGenerate(request)
+      onChunk(fallback.text)
+      return fallback
+    }
+
+    // Use worker thread if available (non-blocking)
+    if (this.workerManager?.ready) {
+      try {
+        log.debug('Starting streaming generation in worker', undefined, 'llm')
+        return await this.workerManager.send<GenerateResponse>('generateStream', request, onChunk)
+      } catch (error) {
+        log.error('Worker stream generation failed, trying main thread', error, 'llm')
+        // Fall through to main thread
+      }
+    }
+
+    // Main thread fallback
+    if (!this.session) {
       const fallback = this.fallbackGenerate(request)
       onChunk(fallback.text)
       return fallback
@@ -234,7 +311,7 @@ class LLMBridge {
       let fullResponse = ''
       let tokensUsed = 0
 
-      log.debug('Starting streaming generation', undefined, 'llm')
+      log.debug('Starting streaming generation (main thread)', undefined, 'llm')
 
       const response = await this.session.prompt(prompt, {
         maxTokens: request.maxTokens || this.config.maxTokens,
@@ -486,7 +563,7 @@ When the user provides lecture context (slides, notes, transcripts), use that in
           
           // Verify file size
           if (totalSize > 0 && downloadedSize < totalSize * 0.99) {
-            fs.unlink(destPath, () => {})
+            fsPromises.unlink(destPath).catch(() => {})
             reject(new Error(`Incomplete download: got ${downloadedSize} of ${totalSize} bytes`))
             return
           }
@@ -496,14 +573,14 @@ When the user provides lecture context (slides, notes, transcripts), use that in
 
         writeStream.on('error', (err) => {
           log.error('Write stream error', err, 'llm')
-          fs.unlink(destPath, () => {})
+          fsPromises.unlink(destPath).catch(() => {})
           reject(err)
         })
 
         response.on('error', (err) => {
           log.error('Response stream error', err, 'llm')
           writeStream.close()
-          fs.unlink(destPath, () => {})
+          fsPromises.unlink(destPath).catch(() => {})
           reject(err)
         })
 
@@ -545,10 +622,30 @@ When the user provides lecture context (slides, notes, transcripts), use that in
     this.config.modelName = modelName
     this.config.contextLength = modelInfo.contextLength
     
+    // Update worker if running
+    if (this.workerManager?.ready) {
+      try {
+        await this.workerManager.send('setModel', {
+          modelPath: newPath,
+          modelName,
+          contextLength: modelInfo.contextLength,
+        })
+      } catch (error) {
+        log.warn('Failed to update worker model', error, 'llm')
+      }
+    }
+    
     return await this.initialize()
   }
 
   async unload(): Promise<void> {
+    // Unload worker first if running
+    if (this.workerManager?.ready) {
+      try {
+        await this.workerManager.send('unload', {})
+      } catch { /* ignore */ }
+    }
+    
     if (this.session) {
       try {
         // Session doesn't need explicit disposal in newer versions
@@ -574,13 +671,13 @@ When the user provides lecture context (slides, notes, transcripts), use that in
   async deleteModel(): Promise<boolean> {
     try {
       await this.unload()
-      if (fs.existsSync(this.modelPath)) {
-        fs.rmSync(this.modelPath, { recursive: true, force: true })
-        log.info('LLM model deleted', { path: this.modelPath }, 'llm')
-        return true
-      }
+      await fsPromises.rm(this.modelPath, { recursive: true, force: true })
+      log.info('LLM model deleted', { path: this.modelPath }, 'llm')
+      return true
     } catch (e) {
-      log.error('Error deleting model', e, 'llm')
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+        log.error('Error deleting model', e, 'llm')
+      }
     }
     return false
   }
@@ -639,13 +736,35 @@ export function registerLLMHandlers() {
   })
 
   ipcMain.handle('llm:generate', async (_event, request: GenerateRequest) => {
-    return await bridge.generate(request)
+    // Security: Validate and sanitize request
+    const validation = validateLLMRequest(request)
+    if (!validation.valid) {
+      log.warn('Invalid LLM request rejected', { error: validation.error }, 'security')
+      return {
+        text: `Error: ${validation.error}`,
+        tokensUsed: 0,
+        finishReason: 'error' as const,
+      }
+    }
+    
+    return await bridge.generate(validation.sanitized || request)
   })
 
   ipcMain.handle('llm:generateStream', async (event, request: GenerateRequest) => {
+    // Security: Validate and sanitize request
+    const validation = validateLLMRequest(request)
+    if (!validation.valid) {
+      log.warn('Invalid LLM stream request rejected', { error: validation.error }, 'security')
+      return {
+        text: `Error: ${validation.error}`,
+        tokensUsed: 0,
+        finishReason: 'error' as const,
+      }
+    }
+    
     const window = BrowserWindow.fromWebContents(event.sender)
     
-    return await bridge.generateStream(request, (chunk: string) => {
+    return await bridge.generateStream(validation.sanitized || request, (chunk: string) => {
       if (window && !window.isDestroyed()) {
         window.webContents.send('llm:chunk', chunk)
       }
@@ -661,6 +780,10 @@ export function registerLLMHandlers() {
   })
 
   ipcMain.handle('llm:setModel', async (_event, modelName: string) => {
+    // Security: Validate model name against allowlist
+    if (!validateModelName(modelName, ALLOWED_LLM_MODELS, 'llm')) {
+      return false
+    }
     return await bridge.setModel(modelName)
   })
 
@@ -670,6 +793,11 @@ export function registerLLMHandlers() {
   })
 
   ipcMain.handle('llm:downloadModel', async (event, modelName: string) => {
+    // Security: Validate model name against allowlist
+    if (!validateModelName(modelName, ALLOWED_LLM_MODELS, 'llm')) {
+      return { success: false, error: `Invalid model name: ${modelName}` }
+    }
+    
     const result = await bridge.downloadModel(modelName, (downloaded, total) => {
       const percent = total > 0 ? Math.round((downloaded / total) * 100) : 0
       event.sender.send('llm:downloadProgress', {

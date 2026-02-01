@@ -1,6 +1,9 @@
 import { useState, useCallback, useRef } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { useSessionStore } from '../stores/sessionStore'
+import { createLogger } from '../lib/logger'
+
+const log = createLogger('noteEnhancement')
 import type { EnhancedNote, Slide, TranscriptSegment } from '@shared/types'
 import { 
   generateEnhancePrompt, 
@@ -41,7 +44,6 @@ interface UseNoteEnhancementReturn {
  */
 export function useNoteEnhancement(): UseNoteEnhancementReturn {
   const { 
-    session, 
     setEnhancedNote, 
     updateEnhancedNoteStatus,
     setSessionPhase 
@@ -56,6 +58,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
   const [isLLMAvailable, setIsLLMAvailable] = useState(false)
   const cancelledRef = useRef(false)
   const enhancingRef = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   /**
    * Check if the LLM is loaded and available
@@ -72,7 +75,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
       setIsLLMAvailable(available)
       return available
     } catch (err) {
-      console.error('Failed to check LLM status:', err)
+      log.error('Failed to check LLM status', err)
       setIsLLMAvailable(false)
       return false
     }
@@ -112,7 +115,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
     // Check LLM availability
     const available = await checkLLMStatus()
     if (!available) {
-      console.error('LLM not available for enhancement')
+      log.warn('LLM not available for enhancement')
       return
     }
 
@@ -167,7 +170,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
       setEnhancedNote(slideId, completedNote)
 
     } catch (err) {
-      console.error('Enhancement error:', err)
+      log.error('Enhancement error', err)
       updateEnhancedNoteStatus(
         slideId,
         'error',
@@ -200,6 +203,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
 
     enhancingRef.current = true
     cancelledRef.current = false
+    abortControllerRef.current = new AbortController()
     setSessionPhase('enhancing')
 
     // Get fresh session and filter slides
@@ -273,7 +277,7 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
         setEnhancedNote(slide.id, completedNote)
 
       } catch (err) {
-        console.error(`Enhancement error for slide ${slide.index}:`, err)
+        log.error(`Enhancement error for slide ${slide.index}`, err)
         updateEnhancedNoteStatus(
           slide.id,
           'error',
@@ -293,9 +297,17 @@ export function useNoteEnhancement(): UseNoteEnhancementReturn {
 
   /**
    * Cancel ongoing enhancement
+   * Note: This sets the cancelled flag but cannot abort in-flight LLM requests
+   * until the Electron API supports AbortController/AbortSignal
    */
   const cancelEnhancement = useCallback(() => {
     cancelledRef.current = true
+    // Signal abort to any listeners (for future API support)
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    enhancingRef.current = false
     setProgress(prev => ({ ...prev, status: 'idle' }))
   }, [])
 

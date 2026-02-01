@@ -118,6 +118,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('export:generatePdf', filePath, exportData),
   
   // ==========================================
+  // Slide Image operations (Lazy Loading)
+  // ==========================================
+  
+  saveSlideImage: (sessionId: string, slideId: string, imageData: string): Promise<string> =>
+    ipcRenderer.invoke('slide:saveImage', sessionId, slideId, imageData),
+  
+  loadSlideImage: (sessionId: string, slideId: string): Promise<string | null> =>
+    ipcRenderer.invoke('slide:loadImage', sessionId, slideId),
+  
+  deleteSlideImage: (sessionId: string, slideId: string): Promise<boolean> =>
+    ipcRenderer.invoke('slide:deleteImage', sessionId, slideId),
+  
+  // ==========================================
   // Whisper (Speech-to-Text) operations
   // ==========================================
   
@@ -242,6 +255,11 @@ export interface ElectronAPI {
   // Export
   exportPdf: (sessionId: string) => Promise<string | null>
   generatePdf: (filePath: string, exportData: ExportData) => Promise<boolean>
+  
+  // Slide Images (Lazy Loading)
+  saveSlideImage: (sessionId: string, slideId: string, imageData: string) => Promise<string>
+  loadSlideImage: (sessionId: string, slideId: string) => Promise<string | null>
+  deleteSlideImage: (sessionId: string, slideId: string) => Promise<boolean>
   
   // Whisper
   whisperInit: () => Promise<boolean>

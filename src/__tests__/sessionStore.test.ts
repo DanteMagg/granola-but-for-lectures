@@ -110,7 +110,8 @@ describe('sessionStore', () => {
       await loadSession('test-id')
       
       const state = useSessionStore.getState()
-      expect(state.error).toEqual({ message: 'Load failed', type: 'load' })
+      // Error handler returns user-friendly message
+      expect(state.error).toEqual({ message: 'Failed to load session', type: 'load' })
     })
   })
 
@@ -151,7 +152,8 @@ describe('sessionStore', () => {
       await saveSession()
       
       const state = useSessionStore.getState()
-      expect(state.error).toEqual({ message: 'Save failed', type: 'save' })
+      // Error handler returns user-friendly message
+      expect(state.error).toEqual({ message: 'Failed to save session', type: 'save' })
     })
   })
 
@@ -187,7 +189,8 @@ describe('sessionStore', () => {
       await deleteSession('test-id')
       
       const state = useSessionStore.getState()
-      expect(state.error).toEqual({ message: 'Delete failed', type: 'delete' })
+      // Error handler returns user-friendly message
+      expect(state.error).toEqual({ message: 'Failed to delete session', type: 'delete' })
     })
   })
 

@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { useSessionStore } from '../renderer/stores/sessionStore'
+import { useSlideStore } from '../renderer/stores/slideStore'
 import { createMockUIState, createMockSession, createMockSlide, createMockNote } from './helpers/mockData'
 import { AUTOSAVE_INTERVAL_MS } from '@shared/constants'
 
@@ -18,6 +19,7 @@ const resetStore = () => {
     isSaving: false,
     error: null,
   })
+  useSlideStore.getState().reset()
 }
 
 describe('sessionStore - Advanced Tests', () => {
@@ -71,10 +73,10 @@ describe('sessionStore - Advanced Tests', () => {
       
       const { saveSession } = useSessionStore.getState()
       
-      // First save fails
+      // First save fails - error handler returns user-friendly message
       await saveSession()
       expect(useSessionStore.getState().error).toEqual({
-        message: 'Network error',
+        message: 'Failed to save session',
         type: 'save',
       })
       
@@ -204,6 +206,9 @@ describe('sessionStore - Advanced Tests', () => {
         }),
       })
       
+      // Also sync to slideStore since saveSession syncs from domain stores
+      useSlideStore.getState().setSlides(manySlides)
+      
       const { saveSession } = useSessionStore.getState()
       await saveSession()
       
@@ -286,8 +291,9 @@ describe('sessionStore - Advanced Tests', () => {
       await refreshSessionList()
       
       const state = useSessionStore.getState()
+      // Error handler returns user-friendly message
       expect(state.error).toEqual({
-        message: 'Network error',
+        message: 'Failed to load sessions',
         type: 'list',
       })
     })
@@ -509,17 +515,23 @@ describe('sessionStore - Advanced Tests', () => {
       const now = Date.now()
       vi.setSystemTime(now)
       
+      const slides = [
+        createMockSlide({ id: 'slide-0', index: 0 }),
+        createMockSlide({ id: 'slide-1', index: 1 }),
+        createMockSlide({ id: 'slide-2', index: 2 }),
+      ]
+      
       useSessionStore.setState({
         session: createMockSession({
           isRecording: true,
-          slides: [
-            createMockSlide({ id: 'slide-0', index: 0 }),
-            createMockSlide({ id: 'slide-1', index: 1 }),
-            createMockSlide({ id: 'slide-2', index: 2 }),
-          ],
+          slides,
           currentSlideIndex: 0,
         }),
       })
+      
+      // Also sync to slideStore since setCurrentSlide delegates there
+      useSlideStore.getState().setSlides(slides)
+      useSlideStore.setState({ currentSlideIndex: 0 })
       
       const { setCurrentSlide } = useSessionStore.getState()
       
@@ -540,16 +552,22 @@ describe('sessionStore - Advanced Tests', () => {
       const now = Date.now()
       vi.setSystemTime(now)
       
+      const slides = [
+        createMockSlide({ id: 'slide-0', index: 0 }),
+        createMockSlide({ id: 'slide-1', index: 1 }),
+      ]
+      
       useSessionStore.setState({
         session: createMockSession({
           isRecording: false,
-          slides: [
-            createMockSlide({ id: 'slide-0', index: 0 }),
-            createMockSlide({ id: 'slide-1', index: 1 }),
-          ],
+          slides,
           currentSlideIndex: 0,
         }),
       })
+      
+      // Also sync to slideStore since setCurrentSlide delegates there
+      useSlideStore.getState().setSlides(slides)
+      useSlideStore.setState({ currentSlideIndex: 0 })
       
       const { setCurrentSlide } = useSessionStore.getState()
       

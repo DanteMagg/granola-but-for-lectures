@@ -7,6 +7,7 @@ import PDFDocument from 'pdfkit'
 import { registerWhisperHandlers } from './native/whisper-bridge.js'
 import { registerLLMHandlers } from './native/llm-bridge.js'
 import { logger, log } from './logger.js'
+import { validateExportData } from './security.js'
 
 // ES module __dirname polyfill
 const __filename = fileURLToPath(import.meta.url)
@@ -49,6 +50,9 @@ const ALLOWED_IPC_CHANNELS = new Set([
   'llm:downloadModel',
   'llm:deleteModel',
   'llm:cancelDownload',
+  'slide:saveImage',
+  'slide:loadImage',
+  'slide:deleteImage',
 ])
 
 // Valid log levels for renderer logging
@@ -172,7 +176,15 @@ function createWindow() {
 
   // Security: Prevent navigation to external URLs
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    const parsedUrl = new URL(url)
+    let parsedUrl: URL
+    try {
+      parsedUrl = new URL(url)
+    } catch {
+      log.security('MALFORMED_URL_BLOCKED', { url, action: 'blocked' })
+      event.preventDefault()
+      return
+    }
+    
     const allowedOrigins = ['localhost', '127.0.0.1']
     
     if (isDev && allowedOrigins.some(origin => parsedUrl.hostname === origin)) {
@@ -234,7 +246,11 @@ app.on('activate', () => {
 
 // File dialog for PDF selection
 ipcMain.handle('dialog:openPdf', async () => {
-  const result = await dialog.showOpenDialog(mainWindow!, {
+  if (!mainWindow) {
+    throw new Error('No main window available')
+  }
+  
+  const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [{ name: 'PDF Files', extensions: ['pdf'] }],
   })
@@ -411,6 +427,89 @@ ipcMain.handle('app:getPaths', async () => {
   }
 })
 
+// ==========================================
+// Slide Image Handlers (Lazy Loading)
+// ==========================================
+
+// Save slide image to disk (separate from session JSON)
+ipcMain.handle(
+  'slide:saveImage',
+  async (_event, sessionId: string, slideId: string, imageData: string) => {
+    const safeSessionId = sanitizeSessionId(sessionId)
+    if (!safeSessionId) {
+      throw new Error('Invalid session ID')
+    }
+
+    // Validate slideId (UUID format)
+    if (!slideId || !/^[a-zA-Z0-9\-]+$/.test(slideId)) {
+      throw new Error('Invalid slide ID')
+    }
+
+    const slidesDir = path.join(sessionsPath, safeSessionId, 'slides')
+    await fsPromises.mkdir(slidesDir, { recursive: true })
+
+    const imageFile = path.join(slidesDir, `${slideId}.png`)
+    const buffer = Buffer.from(imageData, 'base64')
+    await fsPromises.writeFile(imageFile, buffer)
+
+    return imageFile
+  }
+)
+
+// Load slide image from disk
+ipcMain.handle(
+  'slide:loadImage',
+  async (_event, sessionId: string, slideId: string) => {
+    const safeSessionId = sanitizeSessionId(sessionId)
+    if (!safeSessionId) {
+      throw new Error('Invalid session ID')
+    }
+
+    if (!slideId || !/^[a-zA-Z0-9\-]+$/.test(slideId)) {
+      throw new Error('Invalid slide ID')
+    }
+
+    const imageFile = path.join(sessionsPath, safeSessionId, 'slides', `${slideId}.png`)
+    
+    try {
+      const buffer = await fsPromises.readFile(imageFile)
+      return buffer.toString('base64')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return null // Image not found
+      }
+      throw err
+    }
+  }
+)
+
+// Delete slide image
+ipcMain.handle(
+  'slide:deleteImage',
+  async (_event, sessionId: string, slideId: string) => {
+    const safeSessionId = sanitizeSessionId(sessionId)
+    if (!safeSessionId) {
+      throw new Error('Invalid session ID')
+    }
+
+    if (!slideId || !/^[a-zA-Z0-9\-]+$/.test(slideId)) {
+      throw new Error('Invalid slide ID')
+    }
+
+    const imageFile = path.join(sessionsPath, safeSessionId, 'slides', `${slideId}.png`)
+    
+    try {
+      await fsPromises.unlink(imageFile)
+      return true
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return true // Already deleted
+      }
+      throw err
+    }
+  }
+)
+
 // Export session to PDF
 ipcMain.handle('export:pdf', async (_event, sessionId: string) => {
   const safeSessionId = sanitizeSessionId(sessionId)
@@ -418,7 +517,11 @@ ipcMain.handle('export:pdf', async (_event, sessionId: string) => {
     throw new Error('Invalid session ID')
   }
 
-  const result = await dialog.showSaveDialog(mainWindow!, {
+  if (!mainWindow) {
+    throw new Error('No main window available')
+  }
+
+  const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: `lecture-notes-${safeSessionId}.pdf`,
     filters: [{ name: 'PDF Files', extensions: ['pdf'] }],
   })
@@ -482,6 +585,13 @@ ipcMain.handle(
     // Security: Validate export path
     if (!validateExportPath(filePath)) {
       throw new Error('Invalid export path')
+    }
+    
+    // Security: Validate export data structure
+    const dataValidation = validateExportData(exportData)
+    if (!dataValidation.valid) {
+      log.security('EXPORT_DATA_INVALID', { error: dataValidation.error, action: 'rejected' })
+      throw new Error(dataValidation.error || 'Invalid export data')
     }
 
     return new Promise<boolean>((resolve, reject) => {
