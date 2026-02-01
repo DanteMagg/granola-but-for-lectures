@@ -196,7 +196,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ==========================================
   // Logging operations
   // ==========================================
-  
+
   logsGet: () => ipcRenderer.invoke('logs:get'),
   logsGetAll: () => ipcRenderer.invoke('logs:getAll'),
   logsClear: () => ipcRenderer.invoke('logs:clear'),

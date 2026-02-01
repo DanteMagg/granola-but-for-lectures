@@ -32,6 +32,12 @@ global.ResizeObserver = vi.fn().mockImplementation(() => ({
   disconnect: vi.fn(),
 }))
 
+// Mock scrollIntoView
+Element.prototype.scrollIntoView = vi.fn()
+
+// Mock focus
+HTMLElement.prototype.focus = vi.fn()
+
 // Mock matchMedia
 Object.defineProperty(window, 'matchMedia', {
   writable: true,

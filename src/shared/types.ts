@@ -84,6 +84,7 @@ export interface Session {
   totalRecordingDuration?: number // Total ms recorded
   createdAt: string
   updatedAt: string
+  schemaVersion?: number  // Schema version for migrations
 }
 
 export interface SessionListItem {

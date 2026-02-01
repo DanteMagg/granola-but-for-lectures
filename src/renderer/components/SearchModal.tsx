@@ -1,16 +1,18 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
-import { Search, X, FileText, MessageSquare, Mic, ArrowRight } from 'lucide-react'
+import { Search, X, FileText, MessageSquare, Mic, ArrowRight, Sparkles, Filter } from 'lucide-react'
 import { clsx } from 'clsx'
 
 interface SearchResult {
-  type: 'slide' | 'note' | 'transcript'
+  type: 'slide' | 'note' | 'transcript' | 'enhanced'
   slideIndex: number
   slideId: string
   text: string
   matchStart: number
   matchEnd: number
 }
+
+type ResultFilter = 'all' | 'slide' | 'note' | 'transcript' | 'enhanced'
 
 interface SearchModalProps {
   onClose: () => void
@@ -20,6 +22,7 @@ export function SearchModal({ onClose }: SearchModalProps) {
   const { session, setCurrentSlide } = useSessionStore()
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [filter, setFilter] = useState<ResultFilter>('all')
   const inputRef = useRef<HTMLInputElement>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
 
@@ -29,7 +32,7 @@ export function SearchModal({ onClose }: SearchModalProps) {
   }, [])
 
   // Search logic
-  const results = useMemo((): SearchResult[] => {
+  const allResults = useMemo((): SearchResult[] => {
     if (!session || !query.trim()) return []
 
     const searchQuery = query.toLowerCase().trim()
@@ -69,6 +72,23 @@ export function SearchModal({ onClose }: SearchModalProps) {
         }
       }
 
+      // Search enhanced notes
+      const enhancedNote = session.enhancedNotes?.[slide.id]
+      if (enhancedNote?.plainText && enhancedNote.status === 'complete') {
+        const text = enhancedNote.plainText.toLowerCase()
+        const matchIndex = text.indexOf(searchQuery)
+        if (matchIndex !== -1) {
+          results.push({
+            type: 'enhanced',
+            slideIndex: index,
+            slideId: slide.id,
+            text: enhancedNote.plainText,
+            matchStart: matchIndex,
+            matchEnd: matchIndex + searchQuery.length,
+          })
+        }
+      }
+
       // Search transcripts
       const transcripts = session.transcripts[slide.id]
       if (transcripts && transcripts.length > 0) {
@@ -90,6 +110,21 @@ export function SearchModal({ onClose }: SearchModalProps) {
 
     return results
   }, [session, query])
+
+  // Filter results
+  const results = useMemo(() => {
+    if (filter === 'all') return allResults
+    return allResults.filter(r => r.type === filter)
+  }, [allResults, filter])
+
+  // Count results by type
+  const resultCounts = useMemo(() => {
+    const counts = { slide: 0, note: 0, enhanced: 0, transcript: 0 }
+    allResults.forEach(r => {
+      counts[r.type]++
+    })
+    return counts
+  }, [allResults])
 
   // Reset selection when results change
   useEffect(() => {
@@ -156,6 +191,8 @@ export function SearchModal({ onClose }: SearchModalProps) {
         return <FileText className="w-4 h-4 text-zinc-500" />
       case 'note':
         return <MessageSquare className="w-4 h-4 text-blue-500" />
+      case 'enhanced':
+        return <Sparkles className="w-4 h-4 text-amber-500" />
       case 'transcript':
         return <Mic className="w-4 h-4 text-green-500" />
     }
@@ -167,6 +204,8 @@ export function SearchModal({ onClose }: SearchModalProps) {
         return 'Slide'
       case 'note':
         return 'Note'
+      case 'enhanced':
+        return 'Enhanced'
       case 'transcript':
         return 'Transcript'
     }
@@ -202,6 +241,80 @@ export function SearchModal({ onClose }: SearchModalProps) {
           )}
           <kbd className="kbd text-[10px]">ESC</kbd>
         </div>
+
+        {/* Filters */}
+        {query.trim() && allResults.length > 0 && (
+          <div className="flex items-center gap-1 px-4 py-2 border-b border-border bg-zinc-50/50">
+            <Filter className="w-3.5 h-3.5 text-muted-foreground mr-1" />
+            <button
+              onClick={() => setFilter('all')}
+              className={clsx(
+                'px-2 py-1 text-[10px] font-medium rounded-full transition-colors',
+                filter === 'all'
+                  ? 'bg-zinc-900 text-white'
+                  : 'text-muted-foreground hover:bg-zinc-100'
+              )}
+            >
+              All ({allResults.length})
+            </button>
+            {resultCounts.slide > 0 && (
+              <button
+                onClick={() => setFilter('slide')}
+                className={clsx(
+                  'px-2 py-1 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1',
+                  filter === 'slide'
+                    ? 'bg-zinc-700 text-white'
+                    : 'text-muted-foreground hover:bg-zinc-100'
+                )}
+              >
+                <FileText className="w-3 h-3" />
+                Slides ({resultCounts.slide})
+              </button>
+            )}
+            {resultCounts.note > 0 && (
+              <button
+                onClick={() => setFilter('note')}
+                className={clsx(
+                  'px-2 py-1 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1',
+                  filter === 'note'
+                    ? 'bg-blue-500 text-white'
+                    : 'text-muted-foreground hover:bg-zinc-100'
+                )}
+              >
+                <MessageSquare className="w-3 h-3" />
+                Notes ({resultCounts.note})
+              </button>
+            )}
+            {resultCounts.enhanced > 0 && (
+              <button
+                onClick={() => setFilter('enhanced')}
+                className={clsx(
+                  'px-2 py-1 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1',
+                  filter === 'enhanced'
+                    ? 'bg-amber-500 text-white'
+                    : 'text-muted-foreground hover:bg-zinc-100'
+                )}
+              >
+                <Sparkles className="w-3 h-3" />
+                Enhanced ({resultCounts.enhanced})
+              </button>
+            )}
+            {resultCounts.transcript > 0 && (
+              <button
+                onClick={() => setFilter('transcript')}
+                className={clsx(
+                  'px-2 py-1 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1',
+                  filter === 'transcript'
+                    ? 'bg-green-500 text-white'
+                    : 'text-muted-foreground hover:bg-zinc-100'
+                )}
+              >
+                <Mic className="w-3 h-3" />
+                Transcripts ({resultCounts.transcript})
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Results */}
         <div 

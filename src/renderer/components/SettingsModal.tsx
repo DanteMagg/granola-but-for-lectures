@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { X, Download, HardDrive, Cpu, Mic, CheckCircle2, AlertCircle, XCircle, Eye } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { X, Download, HardDrive, Cpu, Mic, CheckCircle2, AlertCircle, XCircle, Eye, Trash2, Copy, Check, FileText, RefreshCw } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccessibility } from '../hooks/useAccessibility'
 
@@ -69,6 +69,12 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const [selectedWhisperModel, setSelectedWhisperModel] = useState('small')
   const [selectedLlmModel, setSelectedLlmModel] = useState('tinyllama-1.1b')
+  
+  // Log viewer state
+  const [logs, setLogs] = useState<string>('')
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logsCopied, setLogsCopied] = useState(false)
+  const [showLogViewer, setShowLogViewer] = useState(false)
 
   const unsubWhisperRef = useRef<(() => void) | null>(null)
   const unsubLlmRef = useRef<(() => void) | null>(null)
@@ -217,6 +223,50 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   }
 
   const { highContrast, autoDeleteAudio, setHighContrast, setAutoDeleteAudio } = useAccessibility()
+
+  // Load logs function
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true)
+    try {
+      const logData = await window.electronAPI.logsGetAll()
+      setLogs(logData || 'No logs available')
+    } catch (err) {
+      setLogs('Failed to load logs: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setLogsLoading(false)
+    }
+  }, [])
+
+  // Copy logs to clipboard
+  const handleCopyLogs = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(logs)
+      setLogsCopied(true)
+      setTimeout(() => setLogsCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy logs:', err)
+    }
+  }, [logs])
+
+  // Clear logs
+  const handleClearLogs = useCallback(async () => {
+    if (confirm('Are you sure you want to clear all logs?')) {
+      try {
+        await window.electronAPI.logsClear()
+        setLogs('')
+        await loadLogs()
+      } catch (err) {
+        console.error('Failed to clear logs:', err)
+      }
+    }
+  }, [loadLogs])
+
+  // Load logs when viewer is opened
+  useEffect(() => {
+    if (showLogViewer) {
+      loadLogs()
+    }
+  }, [showLogViewer, loadLogs])
 
   const tabs = [
     { id: 'models', label: 'AI Models', icon: Cpu },
@@ -654,57 +704,103 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               </div>
 
               <div className="panel p-4 bg-white">
-                <h3 className="font-medium text-foreground mb-3">Diagnostics</h3>
-                <div className="flex items-center justify-between">
+                <h3 className="font-medium text-foreground mb-3">Debug Logs</h3>
+                <div className="flex items-center justify-between mb-3">
                   <div>
-                    <p className="text-sm font-medium text-foreground">Export Logs</p>
+                    <p className="text-sm font-medium text-foreground">Application Logs</p>
                     <p className="text-[10px] text-muted-foreground">
-                      Copy application logs for troubleshooting
+                      View and export logs for troubleshooting
                     </p>
                   </div>
                   <button
-                    onClick={async () => {
-                      try {
-                        const logs = await window.electronAPI.logsGetAll()
-                        await navigator.clipboard.writeText(logs)
-                        // Could add toast notification here
-                        alert('Logs copied to clipboard!')
-                      } catch (err) {
-                        console.error('Failed to export logs:', err)
-                        alert('Failed to export logs')
-                      }
-                    }}
+                    onClick={() => setShowLogViewer(!showLogViewer)}
                     className="btn btn-secondary btn-sm"
                   >
-                    Copy to Clipboard
+                    <FileText className="w-3.5 h-3.5 mr-1.5" />
+                    {showLogViewer ? 'Hide' : 'View'} Logs
                   </button>
                 </div>
+
+                {showLogViewer && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={loadLogs}
+                          className="btn btn-ghost btn-sm text-xs"
+                          disabled={logsLoading}
+                        >
+                          <RefreshCw className={clsx('w-3 h-3 mr-1', logsLoading && 'animate-spin')} />
+                          Refresh
+                        </button>
+                        <button
+                          onClick={handleCopyLogs}
+                          className="btn btn-ghost btn-sm text-xs"
+                          disabled={!logs}
+                        >
+                          {logsCopied ? (
+                            <>
+                              <Check className="w-3 h-3 mr-1 text-green-500" />
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 mr-1" />
+                              Copy
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <button
+                        onClick={handleClearLogs}
+                        className="btn btn-ghost btn-sm text-xs text-red-500 hover:text-red-600"
+                      >
+                        <Trash2 className="w-3 h-3 mr-1" />
+                        Clear
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <pre className="text-[10px] font-mono bg-zinc-900 text-zinc-100 p-3 rounded-lg overflow-auto max-h-48 whitespace-pre-wrap break-all">
+                        {logsLoading ? (
+                          <span className="text-zinc-400">Loading logs...</span>
+                        ) : logs || (
+                          <span className="text-zinc-400">No logs available</span>
+                        )}
+                      </pre>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="panel p-4 bg-white">
-                <h3 className="font-medium text-foreground mb-3">Clear Data</h3>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Clear Logs</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      Delete all log files
+                <h3 className="font-medium text-foreground mb-3">Cache Management</h3>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Downloaded AI models are stored locally. Removing them will require re-downloading.
+                </p>
+                <div className="space-y-2">
+                  {whisperInfo?.modelName && (
+                    <div className="flex items-center justify-between p-2 bg-zinc-50 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <Mic className="w-4 h-4 text-zinc-400" />
+                        <span className="text-xs font-medium">Whisper: {whisperInfo.modelName}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">Downloaded</span>
+                    </div>
+                  )}
+                  {llmInfo?.modelName && (
+                    <div className="flex items-center justify-between p-2 bg-zinc-50 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <Cpu className="w-4 h-4 text-zinc-400" />
+                        <span className="text-xs font-medium">LLM: {llmInfo.modelName}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">Downloaded</span>
+                    </div>
+                  )}
+                  {!whisperInfo?.modelName && !llmInfo?.modelName && (
+                    <p className="text-xs text-muted-foreground text-center py-2">
+                      No models downloaded yet
                     </p>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      if (confirm('Are you sure you want to clear all logs?')) {
-                        try {
-                          await window.electronAPI.logsClear()
-                          alert('Logs cleared!')
-                        } catch (err) {
-                          console.error('Failed to clear logs:', err)
-                        }
-                      }
-                    }}
-                    className="btn btn-secondary btn-sm text-red-600 hover:text-red-700"
-                  >
-                    Clear
-                  </button>
+                  )}
                 </div>
               </div>
             </div>

@@ -13,6 +13,7 @@ import type {
 } from '@shared/types'
 import { AUTOSAVE_INTERVAL_MS, UI_DEFAULTS } from '@shared/constants'
 import { createLogger } from '../lib/logger'
+import { validateSession, migrateSession, CURRENT_SCHEMA_VERSION } from '../lib/sessionValidator'
 
 const log = createLogger('sessionStore')
 
@@ -112,8 +113,10 @@ const createEmptySession = (name?: string): Session => ({
   currentSlideIndex: 0,
   isRecording: false,
   phase: 'idle',
+  totalRecordingDuration: 0,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
+  schemaVersion: CURRENT_SCHEMA_VERSION,
 })
 
 const defaultUIState: UIState = {
@@ -160,7 +163,31 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     try {
       const data = await window.electronAPI.loadSession(sessionId)
       if (data) {
-        const session = JSON.parse(data) as Session
+        const parsed = JSON.parse(data)
+        
+        // Validate session data
+        const validation = validateSession(parsed)
+        
+        if (validation.warnings.length > 0) {
+          log.warn('Session validation warnings', validation.warnings)
+        }
+        
+        // Use recovered session if there were issues, otherwise use parsed data
+        let session: Session = validation.recovered || parsed
+        
+        // Migrate to current schema version if needed
+        if (!session.schemaVersion || session.schemaVersion < CURRENT_SCHEMA_VERSION) {
+          log.info(`Migrating session from version ${session.schemaVersion || 0} to ${CURRENT_SCHEMA_VERSION}`)
+          session = migrateSession(session)
+          // Save migrated session
+          try {
+            await window.electronAPI.saveSession(session.id, JSON.stringify(session))
+            log.info('Migrated session saved successfully')
+          } catch (saveError) {
+            log.warn('Could not save migrated session', saveError)
+          }
+        }
+        
         set({ session, isLoading: false })
       } else {
         set({

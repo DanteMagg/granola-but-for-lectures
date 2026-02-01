@@ -32,8 +32,10 @@ export const createMockSession = (overrides?: Partial<Session>): Session => ({
   currentSlideIndex: 0,
   isRecording: false,
   phase: 'idle',
+  totalRecordingDuration: 0,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
+  schemaVersion: 1,
   ...overrides,
 })
 

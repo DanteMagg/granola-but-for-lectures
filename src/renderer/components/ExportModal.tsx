@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
-import { X, Download, FileText, MessageSquare, Image, Sparkles } from 'lucide-react'
+import { X, Download, FileText, MessageSquare, Image, Sparkles, Eye, EyeOff, FileCode } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { ExportOptions } from '@shared/types'
 
 interface ExtendedExportOptions extends ExportOptions {
   preferEnhanced: boolean  // Use enhanced notes when available
+  format: 'pdf' | 'markdown'
 }
 
 interface ExportModalProps {
@@ -21,16 +22,105 @@ export function ExportModal({ onClose }: ExportModalProps) {
     slideRange: 'all',
     customRange: { start: 1, end: session?.slides.length || 1 },
     preferEnhanced: true,  // Default to enhanced notes
+    format: 'pdf',
   })
   const [isExporting, setIsExporting] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
 
   if (!session) return null
+
+  // Generate preview content
+  const previewContent = useMemo(() => {
+    if (!showPreview) return ''
+    
+    // Determine which slides to preview
+    let slidesToPreview = session.slides
+    if (options.slideRange === 'current') {
+      slidesToPreview = [session.slides[session.currentSlideIndex]]
+    } else if (options.slideRange === 'custom' && options.customRange) {
+      const start = Math.max(0, options.customRange.start - 1)
+      const end = Math.min(session.slides.length, options.customRange.end)
+      slidesToPreview = session.slides.slice(start, end)
+    }
+
+    const lines: string[] = []
+    lines.push(`# ${session.name}`)
+    lines.push(``)
+    lines.push(`*Exported: ${new Date().toLocaleString()}*`)
+    lines.push(``)
+    lines.push(`---`)
+    lines.push(``)
+
+    slidesToPreview.forEach((slide, idx) => {
+      const slideNum = options.slideRange === 'current' 
+        ? session.currentSlideIndex + 1 
+        : options.slideRange === 'custom' && options.customRange 
+          ? options.customRange.start + idx 
+          : slide.index + 1
+      
+      lines.push(`## Slide ${slideNum}`)
+      lines.push(``)
+
+      if (options.includeNotes) {
+        const enhancedNote = session.enhancedNotes?.[slide.id]
+        const originalNote = session.notes[slide.id]
+        
+        let noteText = null
+        if (options.preferEnhanced && enhancedNote?.status === 'complete') {
+          noteText = enhancedNote.plainText
+        } else if (originalNote?.plainText) {
+          noteText = originalNote.plainText
+        }
+
+        if (noteText) {
+          lines.push(`### Notes`)
+          lines.push(``)
+          lines.push(noteText)
+          lines.push(``)
+        }
+      }
+
+      if (options.includeTranscripts) {
+        const transcriptSegments = session.transcripts[slide.id]
+        if (transcriptSegments && transcriptSegments.length > 0) {
+          lines.push(`### Transcript`)
+          lines.push(``)
+          lines.push(`> ${transcriptSegments.map(t => t.text).join(' ')}`)
+          lines.push(``)
+        }
+      }
+
+      lines.push(`---`)
+      lines.push(``)
+    })
+
+    return lines.join('\n')
+  }, [session, options, showPreview])
 
   const handleExport = async () => {
     setIsExporting(true)
 
     try {
-      // Get save path from dialog
+      if (options.format === 'markdown') {
+        // Export as Markdown
+        const markdown = previewContent || generateMarkdown()
+        
+        // Create blob and download
+        const blob = new Blob([markdown], { type: 'text/markdown' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${session.name.replace(/[^a-z0-9]/gi, '_')}.md`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        
+        onClose()
+        return
+      }
+
+      // Get save path from dialog for PDF
       const filePath = await window.electronAPI.exportPdf(session.id)
 
       if (!filePath) {
@@ -98,6 +188,71 @@ export function ExportModal({ onClose }: ExportModalProps) {
     }
   }
 
+  // Generate markdown for export
+  const generateMarkdown = () => {
+    let slidesToExport = session.slides
+    if (options.slideRange === 'current') {
+      slidesToExport = [session.slides[session.currentSlideIndex]]
+    } else if (options.slideRange === 'custom' && options.customRange) {
+      const start = Math.max(0, options.customRange.start - 1)
+      const end = Math.min(session.slides.length, options.customRange.end)
+      slidesToExport = session.slides.slice(start, end)
+    }
+
+    const lines: string[] = []
+    lines.push(`# ${session.name}`)
+    lines.push(``)
+    lines.push(`*Exported: ${new Date().toLocaleString()}*`)
+    lines.push(``)
+    lines.push(`---`)
+    lines.push(``)
+
+    slidesToExport.forEach((slide, idx) => {
+      const slideNum = options.slideRange === 'current' 
+        ? session.currentSlideIndex + 1 
+        : options.slideRange === 'custom' && options.customRange 
+          ? options.customRange.start + idx 
+          : slide.index + 1
+      
+      lines.push(`## Slide ${slideNum}`)
+      lines.push(``)
+
+      if (options.includeNotes) {
+        const enhancedNote = session.enhancedNotes?.[slide.id]
+        const originalNote = session.notes[slide.id]
+        
+        let noteText = null
+        if (options.preferEnhanced && enhancedNote?.status === 'complete') {
+          noteText = enhancedNote.plainText
+        } else if (originalNote?.plainText) {
+          noteText = originalNote.plainText
+        }
+
+        if (noteText) {
+          lines.push(`### Notes`)
+          lines.push(``)
+          lines.push(noteText)
+          lines.push(``)
+        }
+      }
+
+      if (options.includeTranscripts) {
+        const transcriptSegments = session.transcripts[slide.id]
+        if (transcriptSegments && transcriptSegments.length > 0) {
+          lines.push(`### Transcript`)
+          lines.push(``)
+          lines.push(`> ${transcriptSegments.map(t => t.text).join(' ')}`)
+          lines.push(``)
+        }
+      }
+
+      lines.push(`---`)
+      lines.push(``)
+    })
+
+    return lines.join('\n')
+  }
+
   const slideCount = session.slides.length
   const noteCount = Object.keys(session.notes).length
   const transcriptCount = Object.keys(session.transcripts).length
@@ -119,21 +274,68 @@ export function ExportModal({ onClose }: ExportModalProps) {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-foreground tracking-tight">Export Session</h2>
-              <p className="text-xs text-muted-foreground">Export to PDF</p>
+              <p className="text-xs text-muted-foreground">Export to {options.format === 'pdf' ? 'PDF' : 'Markdown'}</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-zinc-100 rounded-lg transition-colors"
-          >
-            <X className="w-5 h-5 text-muted-foreground" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowPreview(!showPreview)}
+              className={clsx(
+                'p-2 rounded-lg transition-colors',
+                showPreview ? 'bg-zinc-200' : 'hover:bg-zinc-100'
+              )}
+              title={showPreview ? 'Hide preview' : 'Show preview'}
+            >
+              {showPreview ? (
+                <EyeOff className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <Eye className="w-4 h-4 text-muted-foreground" />
+              )}
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-zinc-100 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5 text-muted-foreground" />
+            </button>
+          </div>
         </div>
 
         {/* Content options */}
-        <div className="p-6 space-y-5">
+        <div className={clsx("p-6 space-y-5", showPreview && "max-h-[300px] overflow-y-auto")}>
+          {/* Format selection */}
+          <div className="pb-4 border-b border-border">
+            <p className="text-sm font-medium text-foreground mb-3">Export Format</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setOptions({ ...options, format: 'pdf' })}
+                className={clsx(
+                  'flex-1 px-3 py-2 text-xs font-medium rounded-lg transition-all border flex items-center justify-center gap-2',
+                  options.format === 'pdf'
+                    ? 'bg-zinc-900 text-white border-zinc-900 shadow-sm'
+                    : 'bg-white text-muted-foreground border-input hover:bg-zinc-50 hover:text-foreground'
+                )}
+              >
+                <FileText className="w-4 h-4" />
+                PDF Document
+              </button>
+              <button
+                onClick={() => setOptions({ ...options, format: 'markdown' })}
+                className={clsx(
+                  'flex-1 px-3 py-2 text-xs font-medium rounded-lg transition-all border flex items-center justify-center gap-2',
+                  options.format === 'markdown'
+                    ? 'bg-zinc-900 text-white border-zinc-900 shadow-sm'
+                    : 'bg-white text-muted-foreground border-input hover:bg-zinc-50 hover:text-foreground'
+                )}
+              >
+                <FileCode className="w-4 h-4" />
+                Markdown
+              </button>
+            </div>
+          </div>
+
           <p className="text-sm font-medium text-foreground mb-4">
-            Choose what to include in your export:
+            Choose what to include:
           </p>
 
           {/* Include slides */}
@@ -290,6 +492,23 @@ export function ExportModal({ onClose }: ExportModalProps) {
           </div>
         </div>
 
+        {/* Preview panel */}
+        {showPreview && (
+          <div className="border-t border-border">
+            <div className="px-4 py-2 bg-zinc-100 border-b border-border flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">Preview</span>
+              <span className="text-[10px] text-muted-foreground">
+                {options.format === 'markdown' ? 'Markdown' : 'Content'} preview
+              </span>
+            </div>
+            <div className="max-h-[200px] overflow-y-auto bg-white">
+              <pre className="p-4 text-[11px] font-mono text-foreground whitespace-pre-wrap leading-relaxed">
+                {previewContent || 'Select options to see preview'}
+              </pre>
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="px-6 py-4 border-t border-border flex justify-end gap-3 bg-zinc-50/30">
           <button
@@ -311,7 +530,7 @@ export function ExportModal({ onClose }: ExportModalProps) {
             ) : (
               <>
                 <Download className="w-3.5 h-3.5" />
-                Export PDF
+                Export {options.format === 'pdf' ? 'PDF' : 'Markdown'}
               </>
             )}
           </button>

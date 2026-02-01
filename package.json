@@ -95,7 +95,6 @@
     },
     "linux": {
       "target": "AppImage"
-    },
-    "nativeRebuilder": "legacy"
+    }
   }
 }

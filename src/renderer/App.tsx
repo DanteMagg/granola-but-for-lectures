@@ -225,11 +225,13 @@ export default function App() {
         <Header />
 
         <div className="flex-1 flex overflow-hidden">
-          {/* Sidebar */}
-          <Sidebar />
+          {/* Sidebar with error boundary */}
+          <ErrorBoundary section="sidebar" compact>
+            <Sidebar />
+          </ErrorBoundary>
 
-              {/* Main content */}
-              <main id="main-content" className="flex-1 flex flex-col overflow-hidden" role="main" aria-label="Lecture notes workspace">
+          {/* Main content */}
+          <main id="main-content" className="flex-1 flex flex-col overflow-hidden" role="main" aria-label="Lecture notes workspace">
             <ErrorBoundary>
               {session && session.slides.length > 0 ? (
                 <>
@@ -240,14 +242,18 @@ export default function App() {
 
                     {/* Current slide viewer */}
                     <div className="flex-1 flex flex-col min-w-0">
-                      <SlideViewer />
+                      <ErrorBoundary section="slides">
+                        <SlideViewer />
+                      </ErrorBoundary>
                       
                       {/* Recording controls */}
                       <AudioRecorder />
                     </div>
 
-                    {/* Notes panel */}
-                    <NotesPanel />
+                    {/* Notes panel with error boundary */}
+                    <ErrorBoundary section="notes">
+                      <NotesPanel />
+                    </ErrorBoundary>
                   </div>
 
                   {/* Enhance Notes CTA - shown after recording stops */}
@@ -267,7 +273,9 @@ export default function App() {
                   {/* Bottom section: Transcript - hidden during recording unless toggled */}
                   {/* Granola-style: clean UI during recording, show transcript after or if toggled */}
                   {(!session.isRecording || ui.showLiveTranscript) && (
-                    <TranscriptPanel />
+                    <ErrorBoundary section="transcript" compact>
+                      <TranscriptPanel />
+                    </ErrorBoundary>
                   )}
                 </>
               ) : (
@@ -278,16 +286,24 @@ export default function App() {
         </div>
 
         {/* AI Chat Modal */}
-        {ui.showAIChat && <AIChatModal />}
+        {ui.showAIChat && (
+          <ErrorBoundary section="ai-chat" onRetry={() => setUIState({ showAIChat: false })}>
+            <AIChatModal />
+          </ErrorBoundary>
+        )}
 
         {/* Export Modal */}
         {ui.showExportModal && (
-          <ExportModal onClose={() => setUIState({ showExportModal: false })} />
+          <ErrorBoundary section="export" onRetry={() => setUIState({ showExportModal: false })}>
+            <ExportModal onClose={() => setUIState({ showExportModal: false })} />
+          </ErrorBoundary>
         )}
 
         {/* Settings Modal */}
         {ui.showSettingsModal && (
-          <SettingsModal onClose={() => setUIState({ showSettingsModal: false })} />
+          <ErrorBoundary section="settings" onRetry={() => setUIState({ showSettingsModal: false })}>
+            <SettingsModal onClose={() => setUIState({ showSettingsModal: false })} />
+          </ErrorBoundary>
         )}
 
         {/* Shortcuts Help Modal */}
