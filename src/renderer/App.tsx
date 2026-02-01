@@ -17,6 +17,7 @@ import { OnboardingModal, useOnboarding } from './components/OnboardingModal'
 import { SearchModal } from './components/SearchModal'
 import { SessionFeedbackModal } from './components/SessionFeedbackModal'
 import { ToastContainer, toast } from './components/Toast'
+import { EnhanceNotesButton } from './components/EnhanceNotesButton'
 import { usePdfImport } from './hooks/usePdfImport'
 import { SHORTCUTS } from '@shared/constants'
 
@@ -249,8 +250,25 @@ export default function App() {
                     <NotesPanel />
                   </div>
 
-                  {/* Bottom section: Transcript */}
-                  <TranscriptPanel />
+                  {/* Enhance Notes CTA - shown after recording stops */}
+                  {!session.isRecording && session.phase === 'ready_to_enhance' && (
+                    <div className="px-4 pb-4">
+                      <EnhanceNotesButton />
+                    </div>
+                  )}
+
+                  {/* Enhancement progress - shown during enhancement */}
+                  {session.phase === 'enhancing' && (
+                    <div className="px-4 pb-4">
+                      <EnhanceNotesButton />
+                    </div>
+                  )}
+
+                  {/* Bottom section: Transcript - hidden during recording unless toggled */}
+                  {/* Granola-style: clean UI during recording, show transcript after or if toggled */}
+                  {(!session.isRecording || ui.showLiveTranscript) && (
+                    <TranscriptPanel />
+                  )}
                 </>
               ) : (
                 <EmptyState />

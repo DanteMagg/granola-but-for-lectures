@@ -4,13 +4,17 @@ import type {
   Session,
   Slide,
   Note,
+  EnhancedNote,
   TranscriptSegment,
   AIConversation,
   AIMessage,
   UIState,
-  SessionFeedback,
+  SessionPhase,
 } from '@shared/types'
 import { AUTOSAVE_INTERVAL_MS, UI_DEFAULTS } from '@shared/constants'
+import { createLogger } from '../lib/logger'
+
+const log = createLogger('sessionStore')
 
 export type SessionError = {
   message: string
@@ -67,6 +71,13 @@ interface SessionStore {
   setRecording: (isRecording: boolean) => void
   setRecordingStartTime: (time: number | null) => void
 
+  // Session phase actions (Granola-style workflow)
+  setSessionPhase: (phase: SessionPhase) => void
+  
+  // Enhanced notes actions
+  setEnhancedNote: (slideId: string, note: EnhancedNote) => void
+  updateEnhancedNoteStatus: (slideId: string, status: EnhancedNote['status'], error?: string) => void
+
   // AI actions
   addAIMessage: (
     conversationId: string | null,
@@ -95,10 +106,12 @@ const createEmptySession = (name?: string): Session => ({
   name: name || 'Untitled Session',
   slides: [],
   notes: {},
+  enhancedNotes: {},
   transcripts: {},
   aiConversations: [],
   currentSlideIndex: 0,
   isRecording: false,
+  phase: 'idle',
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 })
@@ -114,6 +127,8 @@ const defaultUIState: UIState = {
   showShortcutsHelp: false,
   showSearchModal: false,
   showFeedbackModal: false,
+  showLiveTranscript: false,  // Hide transcript during recording by default (Granola-style)
+  showEnhancedNotes: true,    // Show enhanced notes when available
 }
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null
@@ -156,7 +171,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to load session'
-      console.error('Failed to load session:', error)
+      log.error('Failed to load session', error)
       set({ isLoading: false, error: { message, type: 'load' } })
     }
   },
@@ -181,7 +196,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to save session'
-      console.error('Failed to save session:', error)
+      log.error('Failed to save session', error)
       set({ isSaving: false, error: { message, type: 'save' } })
     }
   },
@@ -202,7 +217,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to delete session'
-      console.error('Failed to delete session:', error)
+      log.error('Failed to delete session', error)
       set({ error: { message, type: 'delete' } })
     }
   },
@@ -216,7 +231,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         error instanceof Error
           ? error.message
           : 'Failed to refresh session list'
-      console.error('Failed to refresh session list:', error)
+      log.error('Failed to refresh session list', error)
       set({ error: { message, type: 'list' } })
     }
   },
@@ -241,10 +256,27 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       if (!state.session) return state
       const maxIndex = state.session.slides.length - 1
       const validIndex = Math.max(0, Math.min(index, maxIndex))
+      const now = Date.now()
+      
+      // Track slide timing during recording (for transcript-slide association)
+      const updatedSlides = state.session.slides.map((slide, i) => {
+        if (state.session!.isRecording) {
+          // Mark current slide as viewed until now
+          if (i === state.session!.currentSlideIndex && !slide.viewedUntil) {
+            return { ...slide, viewedUntil: now }
+          }
+          // Mark new slide as started viewing now
+          if (i === validIndex && !slide.viewedAt) {
+            return { ...slide, viewedAt: now }
+          }
+        }
+        return slide
+      })
 
       return {
         session: {
           ...state.session,
+          slides: updatedSlides,
           currentSlideIndex: validIndex,
         },
       }
@@ -329,14 +361,26 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   setRecording: (isRecording: boolean) => {
-    set(state => ({
-      session: state.session
-        ? {
-            ...state.session,
-            isRecording,
-          }
-        : null,
-    }))
+    set(state => {
+      if (!state.session) return state
+      
+      // Determine the new phase based on recording state
+      let newPhase: SessionPhase = state.session.phase
+      if (isRecording) {
+        newPhase = 'recording'
+      } else if (state.session.phase === 'recording') {
+        // Stopped recording - transition to processing, then ready_to_enhance
+        newPhase = 'processing'
+      }
+      
+      return {
+        session: {
+          ...state.session,
+          isRecording,
+          phase: newPhase,
+        },
+      }
+    })
   },
 
   setRecordingStartTime: (time: number | null) => {
@@ -348,6 +392,57 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           }
         : null,
     }))
+  },
+
+  setSessionPhase: (phase: SessionPhase) => {
+    set(state => ({
+      session: state.session
+        ? {
+            ...state.session,
+            phase,
+          }
+        : null,
+    }))
+    scheduleAutosave(get)
+  },
+
+  setEnhancedNote: (slideId: string, note: EnhancedNote) => {
+    set(state => {
+      if (!state.session) return state
+      return {
+        session: {
+          ...state.session,
+          enhancedNotes: {
+            ...state.session.enhancedNotes,
+            [slideId]: note,
+          },
+        },
+      }
+    })
+    scheduleAutosave(get)
+  },
+
+  updateEnhancedNoteStatus: (slideId: string, status: EnhancedNote['status'], error?: string) => {
+    set(state => {
+      if (!state.session) return state
+      const existingNote = state.session.enhancedNotes[slideId]
+      if (!existingNote) return state
+      
+      return {
+        session: {
+          ...state.session,
+          enhancedNotes: {
+            ...state.session.enhancedNotes,
+            [slideId]: {
+              ...existingNote,
+              status,
+              error,
+            },
+          },
+        },
+      }
+    })
+    scheduleAutosave(get)
   },
 
   addAIMessage: (

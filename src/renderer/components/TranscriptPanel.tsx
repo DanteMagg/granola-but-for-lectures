@@ -5,7 +5,7 @@ import { clsx } from 'clsx'
 import { TRANSCRIPTION_CONFIG } from '@shared/constants'
 
 export function TranscriptPanel() {
-  const { session, ui, setUIState } = useSessionStore()
+  const { session, ui } = useSessionStore()
   const [isExpanded, setIsExpanded] = useState(true)
 
   if (!session || session.slides.length === 0) {

@@ -3,19 +3,14 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { SlideViewer } from '../../renderer/components/SlideViewer'
 import { useSessionStore } from '../../renderer/stores/sessionStore'
 import type { Slide } from '@shared/types'
+import { createMockUIState, createMockSession } from '../helpers/mockData'
 
 // Reset store helper
 const resetStore = () => {
   useSessionStore.setState({
     session: null,
     sessionList: [],
-    ui: {
-      sidebarCollapsed: false,
-      transcriptPanelHeight: 200,
-      notesPanelWidth: 350,
-      showAIChat: false,
-      aiChatContext: 'current-slide',
-    },
+    ui: createMockUIState(),
     isLoading: false,
     isSaving: false,
     error: null,
@@ -37,18 +32,10 @@ const createMockSlides = (count: number): Slide[] =>
 const setupSessionWithSlides = (slideCount: number, currentIndex = 0) => {
   const slides = createMockSlides(slideCount)
   useSessionStore.setState({
-    session: {
-      id: 'test-session',
-      name: 'Test Session',
+    session: createMockSession({
       slides,
-      notes: {},
-      transcripts: {},
-      aiConversations: [],
       currentSlideIndex: currentIndex,
-      isRecording: false,
-      createdAt: '2024-01-01T00:00:00.000Z',
-      updatedAt: '2024-01-01T00:00:00.000Z',
-    },
+    }),
   })
   return slides
 }
@@ -67,18 +54,7 @@ describe('SlideViewer', () => {
 
     it('should render nothing when session has no slides', () => {
       useSessionStore.setState({
-        session: {
-          id: 'test-session',
-          name: 'Empty Session',
-          slides: [],
-          notes: {},
-          transcripts: {},
-          aiConversations: [],
-          currentSlideIndex: 0,
-          isRecording: false,
-          createdAt: '2024-01-01T00:00:00.000Z',
-          updatedAt: '2024-01-01T00:00:00.000Z',
-        },
+        session: createMockSession({ slides: [] }),
       })
       
       const { container } = render(<SlideViewer />)

@@ -1,6 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
 import { AUDIO_CONFIG } from '@shared/constants'
+import { createLogger } from '../lib/logger'
+
+const log = createLogger('audio')
 
 interface WhisperModelInfo {
   loaded: boolean
@@ -71,7 +74,7 @@ export function useAudio(): UseAudioReturn {
         setWhisperInfo(info)
       }
     } catch (err) {
-      console.error('Failed to get Whisper info:', err)
+      log.error('Failed to get Whisper info:', err)
     }
   }, [])
 
@@ -107,7 +110,7 @@ export function useAudio(): UseAudioReturn {
       }
       return false
     } catch (err) {
-      console.error('Failed to init Whisper:', err)
+      log.error('Failed to init Whisper:', err)
       return false
     }
   }, [refreshWhisperInfo])
@@ -140,7 +143,7 @@ export function useAudio(): UseAudioReturn {
         setDownloadProgress(null)
       }
     } catch (err) {
-      console.error('Failed to cancel download:', err)
+      log.error('Failed to cancel download:', err)
     }
   }, [])
 
@@ -154,7 +157,7 @@ export function useAudio(): UseAudioReturn {
       }
       return false
     } catch (err) {
-      console.error('Failed to set Whisper model:', err)
+      log.error('Failed to set Whisper model:', err)
       return false
     }
   }, [refreshWhisperInfo])
@@ -181,12 +184,14 @@ export function useAudio(): UseAudioReturn {
       const result = await window.electronAPI.whisperTranscribe(base64)
       
       // Add transcription segments to the session
+      const now = Date.now()
       if (result.segments && result.segments.length > 0) {
         for (const segment of result.segments) {
           if (segment.text && segment.text.trim()) {
             addTranscriptSegment(session.slides[session.currentSlideIndex].id, {
               text: segment.text.trim(),
-              timestamp: Date.now(),
+              startTime: segment.start,
+              endTime: segment.end,
               confidence: segment.confidence,
             })
           }
@@ -195,12 +200,13 @@ export function useAudio(): UseAudioReturn {
         // Fallback to full text if no segments
         addTranscriptSegment(session.slides[session.currentSlideIndex].id, {
           text: result.text.trim(),
-          timestamp: Date.now(),
+          startTime: now - 5000,
+          endTime: now,
           confidence: 0.9,
         })
       }
     } catch (err) {
-      console.error('Transcription error:', err)
+      log.error('Transcription error:', err)
     } finally {
       setIsTranscribing(false)
     }
@@ -260,7 +266,7 @@ export function useAudio(): UseAudioReturn {
             const audioBlob = new Blob(pendingChunks, { type: AUDIO_CONFIG.MIME_TYPE })
             pendingChunks = []
             // Fire and forget - don't await to avoid blocking recording
-            transcribeAudio(audioBlob).catch(console.error)
+            transcribeAudio(audioBlob).catch(log.error)
           }
         }
       }
@@ -294,7 +300,7 @@ export function useAudio(): UseAudioReturn {
       updateAudioLevel()
 
     } catch (err) {
-      console.error('Failed to start recording:', err)
+      log.error('Failed to start recording:', err)
       setError('Could not access microphone. Please check permissions.')
     }
   }, [setRecording, isPaused, updateAudioLevel, whisperInfo?.loaded, transcribeAudio])

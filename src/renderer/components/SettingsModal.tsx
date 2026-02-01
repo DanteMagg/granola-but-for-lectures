@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Download, HardDrive, Cpu, Mic, Trash2, CheckCircle2, AlertCircle, XCircle, Eye } from 'lucide-react'
+import { X, Download, HardDrive, Cpu, Mic, CheckCircle2, AlertCircle, XCircle, Eye } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccessibility } from '../hooks/useAccessibility'
 
@@ -216,14 +216,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     }
   }
 
-  const formatBytes = (bytes: number) => {
-    if (!bytes) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
-
   const { highContrast, autoDeleteAudio, setHighContrast, setAutoDeleteAudio } = useAccessibility()
 
   const tabs = [
@@ -234,6 +226,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   ] as const
 
   // Get available models from info or use defaults
+  // Models with quality descriptions for classroom use
   const whisperModels = whisperInfo?.availableModels || [
     { name: 'tiny', size: '75 MB', downloaded: false },
     { name: 'tiny.en', size: '75 MB', downloaded: false },
@@ -244,6 +237,39 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     { name: 'medium', size: '1.5 GB', downloaded: false },
     { name: 'medium.en', size: '1.5 GB', downloaded: false },
   ]
+
+  // Model quality recommendations
+  const getModelQuality = (name: string): { quality: string; description: string; recommended: boolean } => {
+    if (name.startsWith('tiny')) {
+      return { 
+        quality: 'Fast', 
+        description: 'Quick but less accurate. Good for clear audio close to mic.',
+        recommended: false 
+      }
+    }
+    if (name.startsWith('base')) {
+      return { 
+        quality: 'Balanced', 
+        description: 'Good balance of speed and accuracy.',
+        recommended: false 
+      }
+    }
+    if (name.startsWith('small')) {
+      return { 
+        quality: 'Good', 
+        description: 'Recommended for most classroom settings.',
+        recommended: true 
+      }
+    }
+    if (name.startsWith('medium')) {
+      return { 
+        quality: 'Best', 
+        description: 'Best accuracy for distant audio or noisy environments.',
+        recommended: false 
+      }
+    }
+    return { quality: 'Unknown', description: '', recommended: false }
+  }
 
   const llmModels = llmInfo?.availableModels || [
     { name: 'tinyllama-1.1b', size: '670 MB', contextLength: 2048, downloaded: false },
@@ -351,26 +377,52 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 </div>
 
                 {!whisperDownload.isDownloading && (
-                  <div className="flex gap-2 mt-4">
-                    <select 
-                      className="flex-1 text-sm rounded-md border-zinc-200 focus:border-zinc-400 focus:ring-0"
-                      value={selectedWhisperModel}
-                      onChange={(e) => setSelectedWhisperModel(e.target.value)}
-                    >
-                      {whisperModels.map(model => (
-                        <option key={model.name} value={model.name}>
-                          {model.name} ({model.size}) {model.downloaded ? '✓' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={handleDownloadWhisper}
-                      className="btn btn-primary btn-sm whitespace-nowrap"
-                      disabled={whisperModels.find(m => m.name === selectedWhisperModel)?.downloaded}
-                    >
-                      <Download className="w-3.5 h-3.5 mr-2" />
-                      {whisperModels.find(m => m.name === selectedWhisperModel)?.downloaded ? 'Downloaded' : 'Download'}
-                    </button>
+                  <div className="mt-4 space-y-3">
+                    {/* Model quality info */}
+                    <div className="p-3 bg-zinc-50 rounded-lg border border-zinc-200">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium text-foreground">
+                          {getModelQuality(selectedWhisperModel).quality} Quality
+                        </span>
+                        {getModelQuality(selectedWhisperModel).recommended && (
+                          <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">
+                            Recommended
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        {getModelQuality(selectedWhisperModel).description}
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <select 
+                        className="flex-1 text-sm rounded-md border-zinc-200 focus:border-zinc-400 focus:ring-0"
+                        value={selectedWhisperModel}
+                        onChange={(e) => setSelectedWhisperModel(e.target.value)}
+                      >
+                        {whisperModels.map(model => {
+                          const quality = getModelQuality(model.name)
+                          return (
+                            <option key={model.name} value={model.name}>
+                              {model.name} ({model.size}) {quality.recommended ? '★' : ''} {model.downloaded ? '✓' : ''}
+                            </option>
+                          )
+                        })}
+                      </select>
+                      <button
+                        onClick={handleDownloadWhisper}
+                        className="btn btn-primary btn-sm whitespace-nowrap"
+                        disabled={whisperModels.find(m => m.name === selectedWhisperModel)?.downloaded}
+                      >
+                        <Download className="w-3.5 h-3.5 mr-2" />
+                        {whisperModels.find(m => m.name === selectedWhisperModel)?.downloaded ? 'Downloaded' : 'Download'}
+                      </button>
+                    </div>
+
+                    <p className="text-[10px] text-muted-foreground">
+                      💡 For lecture halls: Use "small" or "medium" for better accuracy with distant audio.
+                    </p>
                   </div>
                 )}
 

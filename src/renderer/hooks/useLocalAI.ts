@@ -1,5 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
+import { createLogger } from '../lib/logger'
+
+const log = createLogger('localAI')
 
 interface LLMModelInfo {
   loaded: boolean
@@ -80,7 +83,7 @@ export function useLocalAI(): UseLocalAIReturn {
         setModelInfo(info)
       }
     } catch (err) {
-      console.error('Failed to get LLM info:', err)
+      log.error('Failed to get LLM info:', err)
     }
   }, [])
 
@@ -120,7 +123,7 @@ export function useLocalAI(): UseLocalAIReturn {
       }
       return false
     } catch (err) {
-      console.error('Failed to init LLM:', err)
+      log.error('Failed to init LLM:', err)
       return false
     }
   }, [refreshModelInfo])
@@ -153,7 +156,7 @@ export function useLocalAI(): UseLocalAIReturn {
         setDownloadProgress(null)
       }
     } catch (err) {
-      console.error('Failed to cancel download:', err)
+      log.error('Failed to cancel download:', err)
     }
   }, [])
 
@@ -167,7 +170,7 @@ export function useLocalAI(): UseLocalAIReturn {
       }
       return false
     } catch (err) {
-      console.error('Failed to set model:', err)
+      log.error('Failed to set model:', err)
       return false
     }
   }, [refreshModelInfo])

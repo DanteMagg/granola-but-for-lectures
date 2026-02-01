@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
-import { X, Download, FileText, MessageSquare, Image } from 'lucide-react'
+import { X, Download, FileText, MessageSquare, Image, Sparkles } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { ExportOptions } from '@shared/types'
+
+interface ExtendedExportOptions extends ExportOptions {
+  preferEnhanced: boolean  // Use enhanced notes when available
+}
 
 interface ExportModalProps {
   onClose: () => void
@@ -10,12 +14,13 @@ interface ExportModalProps {
 
 export function ExportModal({ onClose }: ExportModalProps) {
   const { session } = useSessionStore()
-  const [options, setOptions] = useState<ExportOptions>({
+  const [options, setOptions] = useState<ExtendedExportOptions>({
     includeSlides: true,
     includeNotes: true,
     includeTranscripts: true,
     slideRange: 'all',
     customRange: { start: 1, end: session?.slides.length || 1 },
+    preferEnhanced: true,  // Default to enhanced notes
   })
   const [isExporting, setIsExporting] = useState(false)
 
@@ -57,16 +62,29 @@ export function ExportModal({ onClose }: ExportModalProps) {
       const exportData = {
         sessionName: session.name,
         exportedAt: new Date().toISOString(),
-        slides: slidesToExport.map((slide, idx) => ({
-          index: startIndex + idx,
-          imageData: options.includeSlides ? slide.imageData : null,
-          note: options.includeNotes
-            ? (session.notes[slide.id]?.plainText ?? null)
-            : null,
-          transcript: options.includeTranscripts
-            ? (session.transcripts[slide.id]?.map(t => t.text).join(' ') ?? null)
-            : null,
-        })),
+        slides: slidesToExport.map((slide, idx) => {
+          // Determine which notes to use
+          let noteContent: string | null = null
+          if (options.includeNotes) {
+            const enhancedNote = session.enhancedNotes?.[slide.id]
+            const originalNote = session.notes[slide.id]
+            
+            if (options.preferEnhanced && enhancedNote?.status === 'complete') {
+              noteContent = enhancedNote.plainText
+            } else if (originalNote?.plainText) {
+              noteContent = originalNote.plainText
+            }
+          }
+
+          return {
+            index: startIndex + idx,
+            imageData: options.includeSlides ? slide.imageData : null,
+            note: noteContent,
+            transcript: options.includeTranscripts
+              ? (session.transcripts[slide.id]?.map(t => t.text).join(' ') ?? null)
+              : null,
+          }
+        }),
       }
 
       // Generate the PDF
@@ -83,6 +101,9 @@ export function ExportModal({ onClose }: ExportModalProps) {
   const slideCount = session.slides.length
   const noteCount = Object.keys(session.notes).length
   const transcriptCount = Object.keys(session.transcripts).length
+  const enhancedCount = Object.values(session.enhancedNotes || {}).filter(
+    n => n.status === 'complete'
+  ).length
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -156,6 +177,22 @@ export function ExportModal({ onClose }: ExportModalProps) {
               <p className="text-xs text-muted-foreground mt-1">
                 Include your handwritten notes for each slide
               </p>
+              
+              {/* Enhanced notes option */}
+              {options.includeNotes && enhancedCount > 0 && (
+                <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={options.preferEnhanced}
+                    onChange={(e) => setOptions({ ...options, preferEnhanced: e.target.checked })}
+                    className="rounded border-input text-zinc-900 focus:ring-zinc-900 transition-all"
+                  />
+                  <span className="text-xs text-foreground flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-500" />
+                    Use enhanced notes when available ({enhancedCount} slides)
+                  </span>
+                </label>
+              )}
             </div>
           </label>
 

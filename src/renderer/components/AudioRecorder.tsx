@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
-import { Mic, MicOff, Pause, Play, Square, AlertTriangle, Loader2 } from 'lucide-react'
+import { Mic, MicOff, Pause, Play, Square, AlertTriangle, Loader2, MessageSquare, MessageSquareOff } from 'lucide-react'
 import { clsx } from 'clsx'
 import { AUDIO_CONFIG, TRANSCRIPTION_CONFIG } from '@shared/constants'
 import { RECORDING_TOGGLE_EVENT } from '../App'
@@ -13,7 +13,7 @@ interface WhisperStatus {
 }
 
 export function AudioRecorder() {
-  const { session, setRecording, setRecordingStartTime, addTranscriptSegment, addRecordingDuration, setUIState } = useSessionStore()
+  const { session, ui, setRecording, setRecordingStartTime, addTranscriptSegment, addRecordingDuration, setUIState, setSessionPhase } = useSessionStore()
   const { autoDeleteAudio } = useAccessibility()
   const [isPaused, setIsPaused] = useState(false)
   const [duration, setDuration] = useState(0)
@@ -22,6 +22,8 @@ export function AudioRecorder() {
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [whisperStatus, setWhisperStatus] = useState<WhisperStatus | null>(null)
   const [pendingChunks, setPendingChunks] = useState(0)
+  const [lowAudioWarning, setLowAudioWarning] = useState(false)
+  const lowAudioCountRef = useRef(0)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -75,7 +77,20 @@ export function AudioRecorder() {
       
       // Calculate average volume
       const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
-      setAudioLevel(average / 255) // Normalize to 0-1
+      const normalizedLevel = average / 255 // Normalize to 0-1
+      setAudioLevel(normalizedLevel)
+
+      // Track low audio levels for warning
+      if (normalizedLevel < 0.05) {
+        lowAudioCountRef.current++
+        // Show warning after 5 seconds of consistently low audio
+        if (lowAudioCountRef.current > 300) { // ~5 seconds at 60fps
+          setLowAudioWarning(true)
+        }
+      } else {
+        lowAudioCountRef.current = 0
+        setLowAudioWarning(false)
+      }
     }
     
     animationFrameRef.current = requestAnimationFrame(updateAudioLevel)
@@ -326,6 +341,8 @@ export function AudioRecorder() {
     setRecordingStartTime(null)
     setIsPaused(false)
     setAudioLevel(0)
+    setLowAudioWarning(false)
+    lowAudioCountRef.current = 0
 
     // Track recording duration
     if (recordedDuration > 0) {
@@ -339,6 +356,11 @@ export function AudioRecorder() {
         setUIState({ showFeedbackModal: true })
       }, 500) // Small delay for smoother UX
     }
+
+    // Transition to ready_to_enhance after a short processing delay
+    setTimeout(() => {
+      setSessionPhase('ready_to_enhance')
+    }, 1500) // Give time for final transcription chunks
   }
 
   const togglePause = () => {
@@ -406,6 +428,14 @@ export function AudioRecorder() {
         <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-amber-50 text-amber-700 text-xs px-3 py-2 rounded-md flex items-center gap-2 border border-amber-200 shadow-sm whitespace-nowrap">
           <AlertTriangle className="w-3.5 h-3.5" />
           <span>Whisper not loaded. Transcription unavailable.</span>
+        </div>
+      )}
+
+      {/* Low audio warning */}
+      {session.isRecording && lowAudioWarning && (
+        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-amber-50 text-amber-700 text-xs px-3 py-2 rounded-md flex items-center gap-2 border border-amber-200 shadow-sm whitespace-nowrap animate-pulse">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          <span>Low audio level. Move closer to the speaker or check your microphone.</span>
         </div>
       )}
 
@@ -483,6 +513,26 @@ export function AudioRecorder() {
           )}
           title={whisperStatus.loaded ? `Whisper: ${whisperStatus.modelName}` : 'Whisper not loaded'}
         />
+      )}
+
+      {/* Toggle live transcript button */}
+      {session.isRecording && (
+        <button
+          onClick={() => setUIState({ showLiveTranscript: !ui.showLiveTranscript })}
+          className={clsx(
+            'btn btn-sm rounded-full w-8 h-8 p-0 flex items-center justify-center transition-colors',
+            ui.showLiveTranscript 
+              ? 'btn-secondary bg-zinc-200' 
+              : 'btn-ghost hover:bg-zinc-100'
+          )}
+          title={ui.showLiveTranscript ? 'Hide live transcript' : 'Show live transcript'}
+        >
+          {ui.showLiveTranscript ? (
+            <MessageSquare className="w-3.5 h-3.5" />
+          ) : (
+            <MessageSquareOff className="w-3.5 h-3.5 text-muted-foreground" />
+          )}
+        </button>
       )}
 
       {/* Error message */}

@@ -3,6 +3,9 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { SearchModal } from '../../renderer/components/SearchModal'
 import { useSessionStore } from '../../renderer/stores/sessionStore'
 
+// Mock scrollIntoView for jsdom
+Element.prototype.scrollIntoView = vi.fn()
+
 // Mock the session store
 vi.mock('../../renderer/stores/sessionStore', () => ({
   useSessionStore: vi.fn(),

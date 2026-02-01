@@ -4,6 +4,7 @@ import * as fs from 'fs'
 import * as fsPromises from 'fs/promises'
 import * as https from 'https'
 import * as http from 'http'
+import { log } from '../logger.js'
 
 // Local LLM integration bridge
 // Uses node-llama-cpp for actual inference
@@ -91,7 +92,7 @@ class LLMBridge {
   async initialize(): Promise<boolean> {
     // Check if model exists
     if (!fs.existsSync(this.config.modelPath)) {
-      console.log('LLM model not found at:', this.config.modelPath)
+      log.info('LLM model not found', { path: this.config.modelPath }, 'llm')
       return false
     }
 
@@ -101,16 +102,16 @@ class LLMBridge {
       
       if (llamaModule) {
         const { getLlama } = llamaModule
-        
-        console.log('Initializing Llama...')
+
+        log.debug('Initializing Llama runtime', undefined, 'llm')
         this.llama = await getLlama()
-        
-        console.log('Loading model from:', this.config.modelPath)
+
+        log.debug('Loading model', { path: this.config.modelPath }, 'llm')
         this.model = await this.llama.loadModel({
           modelPath: this.config.modelPath,
         })
-        
-        console.log('Creating context...')
+
+        log.debug('Creating context', { contextLength: this.config.contextLength }, 'llm')
         this.context = await this.model.createContext({
           contextSize: this.config.contextLength,
         })
@@ -123,11 +124,11 @@ class LLMBridge {
         })
         
         this.isLoaded = true
-        console.log('LLM initialized successfully with model:', this.config.modelName)
+        log.info('LLM initialized', { model: this.config.modelName }, 'llm')
         return true
       }
     } catch (error) {
-      console.error('Failed to initialize LLM:', error)
+      log.error('Failed to initialize LLM', error, 'llm')
       this.isLoaded = false
     }
     
@@ -141,9 +142,9 @@ class LLMBridge {
 
     try {
       const prompt = this.buildPrompt(request)
-      
-      console.log('Generating response for prompt:', prompt.substring(0, 100) + '...')
-      
+
+      log.debug('Generating response', { promptPreview: prompt.substring(0, 100) }, 'llm')
+
       const response = await this.session.prompt(prompt, {
         maxTokens: request.maxTokens || this.config.maxTokens,
         temperature: request.temperature || this.config.temperature,
@@ -155,7 +156,7 @@ class LLMBridge {
         finishReason: 'stop',
       }
     } catch (error) {
-      console.error('Generation error:', error)
+      log.error('Generation error', error, 'llm')
       return {
         text: `Error generating response: ${error instanceof Error ? error.message : 'Unknown error'}`,
         tokensUsed: 0,
@@ -179,7 +180,7 @@ class LLMBridge {
       let fullResponse = ''
       let tokensUsed = 0
 
-      console.log('Starting streaming generation...')
+      log.debug('Starting streaming generation', undefined, 'llm')
 
       const response = await this.session.prompt(prompt, {
         maxTokens: request.maxTokens || this.config.maxTokens,
@@ -197,7 +198,7 @@ class LLMBridge {
         finishReason: 'stop',
       }
     } catch (error) {
-      console.error('Stream generation error:', error)
+      log.error('Stream generation error', error, 'llm')
       const errorMsg = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
       onChunk(errorMsg)
       return {
@@ -280,7 +281,7 @@ When the user provides lecture context (slides, notes, transcripts), use that in
     if (fs.existsSync(destPath)) {
       const stats = await fsPromises.stat(destPath)
       if (stats.size > 100000000) { // At least 100MB
-        console.log(`Model ${modelName} already exists at ${destPath}`)
+        log.info('Model already exists', { modelName, path: destPath }, 'llm')
         // Update config
         this.config.modelPath = destPath
         this.config.modelName = modelName
@@ -289,7 +290,7 @@ When the user provides lecture context (slides, notes, transcripts), use that in
       }
     }
 
-    console.log(`Downloading LLM model: ${modelName} from ${modelInfo.url}`)
+    log.info('Downloading LLM model', { modelName, url: modelInfo.url }, 'llm')
 
     // Create abort controller for cancellation
     this.downloadAbortController = new AbortController()
@@ -312,9 +313,10 @@ When the user provides lecture context (slides, notes, transcripts), use that in
         try {
           await fsPromises.unlink(destPath)
         } catch { /* ignore */ }
+        log.info('Model download cancelled', { modelName }, 'llm')
         return { success: false, error: 'Download cancelled' }
       }
-      console.error('Download error:', error)
+      log.error('Model download failed', error, 'llm')
       return { success: false, error: error.message || 'Download failed' }
     } finally {
       this.downloadAbortController = null
@@ -338,7 +340,7 @@ When the user provides lecture context (slides, notes, transcripts), use that in
         if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 307) {
           const redirectUrl = response.headers.location
           if (redirectUrl) {
-            console.log(`Redirecting to: ${redirectUrl}`)
+            log.debug('Following redirect', { redirectUrl }, 'llm')
             this.downloadFile(redirectUrl, destPath, onProgress)
               .then(resolve)
               .catch(reject)
@@ -441,10 +443,11 @@ When the user provides lecture context (slides, notes, transcripts), use that in
       await this.unload()
       if (fs.existsSync(this.modelPath)) {
         fs.rmSync(this.modelPath, { recursive: true, force: true })
+        log.info('LLM model deleted', { path: this.modelPath }, 'llm')
         return true
       }
     } catch (e) {
-      console.error('Error deleting model:', e)
+      log.error('Error deleting model', e, 'llm')
     }
     return false
   }

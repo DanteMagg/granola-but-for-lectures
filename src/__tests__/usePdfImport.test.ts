@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { usePdfImport } from '../renderer/hooks/usePdfImport'
 import { useSessionStore } from '../renderer/stores/sessionStore'
+import { createMockUIState, createMockSession } from './helpers/mockData'
 
 // Mock pdfjs-dist
 vi.mock('pdfjs-dist', () => {
@@ -46,26 +47,9 @@ vi.mock('../renderer/components/Toast', () => ({
 // Reset store helper
 const resetStore = () => {
   useSessionStore.setState({
-    session: {
-      id: 'test-session',
-      name: 'Untitled Session',
-      slides: [],
-      notes: {},
-      transcripts: {},
-      aiConversations: [],
-      currentSlideIndex: 0,
-      isRecording: false,
-      createdAt: '2024-01-01T00:00:00.000Z',
-      updatedAt: '2024-01-01T00:00:00.000Z',
-    },
+    session: createMockSession(),
     sessionList: [],
-    ui: {
-      sidebarCollapsed: false,
-      transcriptPanelHeight: 200,
-      notesPanelWidth: 350,
-      showAIChat: false,
-      aiChatContext: 'current-slide',
-    },
+    ui: createMockUIState(),
     isLoading: false,
     isSaving: false,
     error: null,
@@ -225,18 +209,7 @@ describe('usePdfImport', () => {
       const setSessionNameSpy = vi.fn()
       
       useSessionStore.setState({
-        session: {
-          id: 'test-session',
-          name: 'Untitled Session',
-          slides: [],
-          notes: {},
-          transcripts: {},
-          aiConversations: [],
-          currentSlideIndex: 0,
-          isRecording: false,
-          createdAt: '2024-01-01T00:00:00.000Z',
-          updatedAt: '2024-01-01T00:00:00.000Z',
-        },
+        session: createMockSession({ name: 'Untitled Session' }),
         setSessionName: setSessionNameSpy,
         setPdfFileName: setPdfFileNameSpy,
         setSlides: vi.fn(),
@@ -261,18 +234,7 @@ describe('usePdfImport', () => {
       const setSessionNameSpy = vi.fn()
       
       useSessionStore.setState({
-        session: {
-          id: 'test-session',
-          name: 'My Custom Session Name',
-          slides: [],
-          notes: {},
-          transcripts: {},
-          aiConversations: [],
-          currentSlideIndex: 0,
-          isRecording: false,
-          createdAt: '2024-01-01T00:00:00.000Z',
-          updatedAt: '2024-01-01T00:00:00.000Z',
-        },
+        session: createMockSession({ name: 'My Custom Session Name' }),
         setSessionName: setSessionNameSpy,
         setPdfFileName: vi.fn(),
         setSlides: vi.fn(),

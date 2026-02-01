@@ -1,19 +1,14 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { useSessionStore } from '../renderer/stores/sessionStore'
 import type { Slide, Session } from '@shared/types'
+import { createMockUIState, createMockSession } from './helpers/mockData'
 
 // Helper to reset store between tests
 const resetStore = () => {
   useSessionStore.setState({
     session: null,
     sessionList: [],
-    ui: {
-      sidebarCollapsed: false,
-      transcriptPanelHeight: 200,
-      notesPanelWidth: 350,
-      showAIChat: false,
-      aiChatContext: 'current-slide',
-    },
+    ui: createMockUIState(),
     isLoading: false,
     isSaving: false,
     error: null,
@@ -86,18 +81,11 @@ describe('sessionStore', () => {
 
   describe('loadSession', () => {
     it('should load an existing session', async () => {
-      const mockSession: Session = {
+      const mockSession: Session = createMockSession({
         id: 'test-id',
         name: 'Loaded Session',
         slides: createMockSlides(3),
-        notes: {},
-        transcripts: {},
-        aiConversations: [],
-        currentSlideIndex: 0,
-        isRecording: false,
-        createdAt: '2024-01-01T00:00:00.000Z',
-        updatedAt: '2024-01-01T00:00:00.000Z',
-      }
+      })
       
       window.electronAPI.loadSession = vi.fn().mockResolvedValue(JSON.stringify(mockSession))
       

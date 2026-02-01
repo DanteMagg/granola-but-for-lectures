@@ -54,14 +54,14 @@ function sanitizeSessionId(sessionId: string): string | null {
 
   // Must be at least 1 char and match what we cleaned
   if (sanitized.length === 0 || sanitized !== sessionId) {
-    console.error(`Invalid session ID rejected: ${sessionId}`)
+    log.warn('Invalid session ID rejected', { sessionId }, 'security')
     return null
   }
 
   // Additional check: ensure resolved path stays within sessions directory
   const resolvedPath = path.resolve(sessionsPath, sanitized)
   if (!resolvedPath.startsWith(sessionsPath)) {
-    console.error(`Path traversal attempt blocked: ${sessionId}`)
+    log.warn('Path traversal attempt blocked', { sessionId }, 'security')
     return null
   }
 
@@ -387,7 +387,7 @@ ipcMain.handle(
               })
               doc.moveDown()
             } catch (imgError) {
-              console.error(`Failed to add image for slide ${slide.index}:`, imgError)
+              log.error(`Failed to add image for slide ${slide.index}`, imgError, 'export')
               doc
                 .fontSize(10)
                 .fillColor('#999999')

@@ -3,19 +3,20 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "outDir": "dist/main",
-    "rootDir": "src/main",
+    "outDir": "dist",
+    "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "declaration": false,
+    "declaration": true,
+    "composite": true,
     "paths": {
       "@shared/*": ["./src/shared/*"]
     },
     "baseUrl": "."
   },
-  "include": ["src/main/**/*", "src/types/**/*"],
+  "include": ["src/main/**/*", "src/shared/**/*", "src/types/**/*"],
   "exclude": ["node_modules"]
 }
 

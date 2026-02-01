@@ -5,6 +5,9 @@ import type { Slide } from '@shared/types'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { TextItem } from 'pdfjs-dist/types/src/display/api'
 import { toast } from '../stores/toastStore'
+import { createLogger } from '../lib/logger'
+
+const log = createLogger('pdfImport')
 
 // Set up PDF.js worker - use local bundled worker for offline support
 // Falls back to CDN if local worker fails to load
@@ -121,7 +124,7 @@ export function usePdfImport() {
 
       await processPdfData(pdfData, fileName)
     } catch (err) {
-      console.error('PDF import failed:', err)
+      log.error('PDF import failed', err)
       const errorMsg = err instanceof Error ? err.message : 'Failed to import PDF'
       setError(errorMsg)
       toast.error('Import Failed', errorMsg)
@@ -152,7 +155,7 @@ export function usePdfImport() {
       await processPdfData(pdfData, file.name)
       return true
     } catch (err) {
-      console.error('PDF import failed:', err)
+      log.error('PDF import from file failed', err)
       const errorMsg = err instanceof Error ? err.message : 'Failed to import PDF'
       setError(errorMsg)
       toast.error('Import Failed', errorMsg)

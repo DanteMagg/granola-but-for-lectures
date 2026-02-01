@@ -3,19 +3,14 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { Sidebar } from '../../renderer/components/Sidebar'
 import { useSessionStore } from '../../renderer/stores/sessionStore'
 import type { SessionListItem } from '@shared/types'
+import { createMockUIState, createMockSession } from '../helpers/mockData'
 
 // Reset store helper
 const resetStore = () => {
   useSessionStore.setState({
     session: null,
     sessionList: [],
-    ui: {
-      sidebarCollapsed: false,
-      transcriptPanelHeight: 200,
-      notesPanelWidth: 350,
-      showAIChat: false,
-      aiChatContext: 'current-slide',
-    },
+    ui: createMockUIState(),
     isLoading: false,
     isSaving: false,
     error: null,
@@ -47,13 +42,7 @@ describe('Sidebar', () => {
   describe('collapsed state', () => {
     it('should render collapsed sidebar when ui.sidebarCollapsed is true', () => {
       useSessionStore.setState({
-        ui: {
-          sidebarCollapsed: true,
-          transcriptPanelHeight: 200,
-          notesPanelWidth: 350,
-          showAIChat: false,
-          aiChatContext: 'current-slide',
-        },
+        ui: createMockUIState({ sidebarCollapsed: true }),
       })
       
       render(<Sidebar />)
@@ -68,13 +57,7 @@ describe('Sidebar', () => {
     it('should call setUIState to expand when expand button clicked', () => {
       const setUIStateSpy = vi.fn()
       useSessionStore.setState({
-        ui: {
-          sidebarCollapsed: true,
-          transcriptPanelHeight: 200,
-          notesPanelWidth: 350,
-          showAIChat: false,
-          aiChatContext: 'current-slide',
-        },
+        ui: createMockUIState({ sidebarCollapsed: true }),
         setUIState: setUIStateSpy,
       })
       
@@ -157,18 +140,7 @@ describe('Sidebar', () => {
       const sessions = createMockSessionList(3)
       useSessionStore.setState({
         sessionList: sessions,
-        session: {
-          id: 'session-1',
-          name: 'Session 2',
-          slides: [],
-          notes: {},
-          transcripts: {},
-          aiConversations: [],
-          currentSlideIndex: 0,
-          isRecording: false,
-          createdAt: '2024-01-01T00:00:00.000Z',
-          updatedAt: '2024-01-01T00:00:00.000Z',
-        },
+        session: createMockSession({ id: 'session-1', name: 'Session 2' }),
       })
       
       render(<Sidebar />)
@@ -215,13 +187,7 @@ describe('Sidebar', () => {
 
     it('should show new session button in collapsed mode', () => {
       useSessionStore.setState({
-        ui: {
-          sidebarCollapsed: true,
-          transcriptPanelHeight: 200,
-          notesPanelWidth: 350,
-          showAIChat: false,
-          aiChatContext: 'current-slide',
-        },
+        ui: createMockUIState({ sidebarCollapsed: true }),
       })
       
       render(<Sidebar />)

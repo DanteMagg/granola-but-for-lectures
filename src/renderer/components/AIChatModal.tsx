@@ -1,10 +1,33 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSessionStore } from '../stores/sessionStore'
-import { X, Send, Sparkles, ChevronDown, Copy, Check, Square, Settings, AlertCircle } from 'lucide-react'
+import { X, Send, Sparkles, ChevronDown, Copy, Check, Square, Settings, AlertCircle, Lightbulb, HelpCircle, BookOpen } from 'lucide-react'
 import { clsx } from 'clsx'
 import { AI_CONFIG } from '@shared/constants'
 
 type ContextType = typeof AI_CONFIG.CONTEXT_TYPES[number]
+
+// Quick action prompts for slide-aware chat
+const QUICK_ACTIONS = [
+  {
+    id: 'explain',
+    label: 'Explain this slide',
+    icon: Lightbulb,
+    prompt: 'Explain the key concepts on this slide in simple terms. What are the main takeaways?',
+  },
+  {
+    id: 'quiz',
+    label: 'Quiz me',
+    icon: HelpCircle,
+    prompt: 'Create 3 quiz questions based on this slide to test my understanding. Include the answers.',
+  },
+  {
+    id: 'summarize',
+    label: 'Summarize lecture',
+    icon: BookOpen,
+    prompt: 'Provide a comprehensive summary of the entire lecture, highlighting the main topics and key points.',
+    context: 'all-slides' as ContextType,
+  },
+]
 
 interface LLMStatus {
   available: boolean
@@ -90,49 +113,72 @@ export function AIChatModal() {
     }, 100)
   }
 
-  const getContextText = useCallback((): string => {
+  const getContextText = useCallback((overrideContext?: ContextType): string => {
     if (!session) return ''
 
-    switch (context) {
+    const activeContext = overrideContext || context
+
+    switch (activeContext) {
       case 'current-slide': {
         const slide = session.slides[session.currentSlideIndex]
         if (!slide) return ''
         
         const note = session.notes[slide.id]
+        const enhancedNote = session.enhancedNotes?.[slide.id]
         const transcripts = session.transcripts[slide.id] || []
         
-        let contextText = `Current slide: ${session.currentSlideIndex + 1}\n`
+        let contextText = `## Current Slide Context
+Slide ${session.currentSlideIndex + 1} of ${session.slides.length}
+`
         if (slide.extractedText) {
-          contextText += `Slide text: ${slide.extractedText}\n`
+          contextText += `\n### Slide Content\n${slide.extractedText}\n`
         }
         if (note?.plainText) {
-          contextText += `Notes: ${note.plainText}\n`
+          contextText += `\n### Student's Notes\n${note.plainText}\n`
+        }
+        if (enhancedNote?.status === 'complete') {
+          contextText += `\n### Enhanced Notes\n${enhancedNote.plainText}\n`
         }
         if (transcripts.length > 0) {
-          contextText += `Transcript: ${transcripts.map(t => t.text).join(' ')}\n`
+          contextText += `\n### Professor's Transcript\n${transcripts.map(t => t.text).join(' ')}\n`
         }
         return contextText
       }
       
       case 'all-slides': {
-        return session.slides.map((slide, i) => {
+        let contextText = `## Full Lecture Context
+Total slides: ${session.slides.length}
+Session: ${session.name}
+
+`
+        contextText += session.slides.map((slide, i) => {
           const note = session.notes[slide.id]
+          const enhancedNote = session.enhancedNotes?.[slide.id]
           const transcripts = session.transcripts[slide.id] || []
           
-          let text = `Slide ${i + 1}:`
-          if (slide.extractedText) text += ` ${slide.extractedText}`
-          if (note?.plainText) text += ` Notes: ${note.plainText}`
-          if (transcripts.length > 0) text += ` Transcript: ${transcripts.map(t => t.text).join(' ')}`
+          let text = `### Slide ${i + 1}`
+          if (slide.extractedText) text += `\nContent: ${slide.extractedText}`
+          if (note?.plainText) text += `\nNotes: ${note.plainText}`
+          if (enhancedNote?.status === 'complete') text += `\nEnhanced: ${enhancedNote.plainText}`
+          if (transcripts.length > 0) text += `\nTranscript: ${transcripts.map(t => t.text).join(' ')}`
           
           return text
         }).join('\n\n')
+        
+        return contextText
       }
       
       case 'all-notes': {
-        return Object.entries(session.notes)
+        return `## All Notes
+` + Object.entries(session.notes)
           .map(([slideId, note]) => {
             const slideIndex = session.slides.findIndex(s => s.id === slideId)
-            return `Slide ${slideIndex + 1}: ${note.plainText}`
+            const enhancedNote = session.enhancedNotes?.[slideId]
+            let text = `### Slide ${slideIndex + 1}\nOriginal: ${note.plainText}`
+            if (enhancedNote?.status === 'complete') {
+              text += `\nEnhanced: ${enhancedNote.plainText}`
+            }
+            return text
           })
           .join('\n\n')
       }
@@ -141,6 +187,20 @@ export function AIChatModal() {
         return ''
     }
   }, [session, context])
+
+  // System prompt for slide-aware chat
+  const getSystemPrompt = useCallback((): string => {
+    return `You are a helpful lecture assistant. The student is reviewing their lecture notes and may ask questions about the content.
+
+Your role:
+- Help explain concepts from the lecture slides and transcript
+- Answer questions based on the provided context
+- Be concise but thorough
+- Reference specific slide numbers when relevant
+- If asked to quiz, create meaningful questions that test understanding
+
+Always base your answers on the provided lecture context. If information isn't in the context, say so.`
+  }, [])
 
   const handleStopGenerating = () => {
     abortRef.current = true
@@ -158,13 +218,9 @@ export function AIChatModal() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    if (!input.trim() || !session || isLoading) return
+  const sendMessage = useCallback(async (userMessage: string, overrideContext?: ContextType) => {
+    if (!session || isLoading) return
 
-    const userMessage = input.trim()
-    setInput('')
     setIsLoading(true)
     abortRef.current = false
 
@@ -173,7 +229,7 @@ export function AIChatModal() {
     addAIMessage(conversationId, {
       role: 'user',
       content: userMessage,
-      slideContext: context,
+      slideContext: overrideContext || context,
     })
 
     // Check if LLM is available
@@ -186,7 +242,8 @@ export function AIChatModal() {
       return
     }
 
-    const contextText = getContextText()
+    const contextText = getContextText(overrideContext)
+    const systemPrompt = getSystemPrompt()
 
     try {
       // Try streaming first
@@ -222,6 +279,7 @@ export function AIChatModal() {
         const response = await window.electronAPI.llmGenerateStream({
           prompt: userMessage,
           context: contextText,
+          systemPrompt,
           maxTokens: 1024,
           temperature: 0.7,
         })
@@ -246,6 +304,7 @@ export function AIChatModal() {
         const response = await window.electronAPI.llmGenerate({
           prompt: userMessage,
           context: contextText,
+          systemPrompt,
           maxTokens: 1024,
           temperature: 0.7,
         })
@@ -271,6 +330,21 @@ export function AIChatModal() {
       setIsStreaming(false)
       setStreamingMessageId(null)
     }
+  }, [session, isLoading, currentConversation, context, llmStatus.available, getContextText, getSystemPrompt, addAIMessage, updateAIMessage])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!input.trim() || !session || isLoading) return
+
+    const userMessage = input.trim()
+    setInput('')
+    await sendMessage(userMessage)
+  }
+
+  const handleQuickAction = (action: typeof QUICK_ACTIONS[number]) => {
+    if (isLoading) return
+    sendMessage(action.prompt, action.context)
   }
 
   const contextLabels: Record<ContextType, string> = {
@@ -289,7 +363,6 @@ export function AIChatModal() {
         // Code block
         const code = part.slice(3, -3)
         const firstNewline = code.indexOf('\n')
-        const language = firstNewline > 0 ? code.slice(0, firstNewline).trim() : ''
         const codeContent = firstNewline > 0 ? code.slice(firstNewline + 1) : code
         
         return (
@@ -409,14 +482,32 @@ export function AIChatModal() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-zinc-50/30">
           {messages.length === 0 ? (
-            <div className="text-center py-12">
+            <div className="text-center py-8">
               <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center mx-auto mb-4">
                 <Sparkles className="w-6 h-6 text-zinc-400" />
               </div>
-              <p className="text-foreground font-medium mb-1">No messages yet</p>
-              <p className="text-sm text-muted-foreground">
-                Ask questions about your lecture content.
+              <p className="text-foreground font-medium mb-1">Ask about your lecture</p>
+              <p className="text-sm text-muted-foreground mb-6">
+                Get explanations, quiz yourself, or summarize content.
               </p>
+              
+              {/* Quick Actions */}
+              {llmStatus.available && (
+                <div className="flex flex-wrap justify-center gap-2 mb-4">
+                  {QUICK_ACTIONS.map((action) => (
+                    <button
+                      key={action.id}
+                      onClick={() => handleQuickAction(action)}
+                      disabled={isLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-white border border-zinc-200 rounded-lg text-sm font-medium text-foreground hover:bg-zinc-50 hover:border-zinc-300 transition-colors shadow-sm"
+                    >
+                      <action.icon className="w-4 h-4 text-zinc-500" />
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              
               {!llmStatus.available && (
                 <button
                   onClick={handleOpenSettings}

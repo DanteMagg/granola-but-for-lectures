@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { NotesPanel } from '../../renderer/components/NotesPanel'
 import { useSessionStore } from '../../renderer/stores/sessionStore'
 import type { Slide, Note } from '@shared/types'
+import { createMockSession, createMockUIState } from '../helpers/mockData'
 
 // Mock TipTap editor
 vi.mock('@tiptap/react', () => ({
@@ -28,9 +29,21 @@ vi.mock('@tiptap/react', () => ({
       setContent: vi.fn(),
     },
   }),
-  EditorContent: ({ editor }: { editor: unknown }) => (
+  EditorContent: () => (
     <div data-testid="editor-content">Editor Content</div>
   ),
+}))
+
+// Mock useNoteEnhancement hook
+vi.mock('../../renderer/hooks/useNoteEnhancement', () => ({
+  useNoteEnhancement: () => ({
+    enhanceSlide: vi.fn(),
+    enhanceAllSlides: vi.fn(),
+    cancelEnhancement: vi.fn(),
+    progress: { currentSlide: 0, totalSlides: 0, status: 'idle' },
+    isLLMAvailable: false,
+    checkLLMStatus: vi.fn(),
+  }),
 }))
 
 vi.mock('@tiptap/starter-kit', () => ({
@@ -48,13 +61,7 @@ const resetStore = () => {
   useSessionStore.setState({
     session: null,
     sessionList: [],
-    ui: {
-      sidebarCollapsed: false,
-      transcriptPanelHeight: 200,
-      notesPanelWidth: 350,
-      showAIChat: false,
-      aiChatContext: 'current-slide',
-    },
+    ui: createMockUIState(),
     isLoading: false,
     isSaving: false,
     error: null,
@@ -80,18 +87,11 @@ const setupSessionWithSlides = (
 ) => {
   const slides = createMockSlides(slideCount)
   useSessionStore.setState({
-    session: {
-      id: 'test-session',
-      name: 'Test Session',
+    session: createMockSession({
       slides,
       notes,
-      transcripts: {},
-      aiConversations: [],
       currentSlideIndex: currentIndex,
-      isRecording: false,
-      createdAt: '2024-01-01T00:00:00.000Z',
-      updatedAt: '2024-01-01T00:00:00.000Z',
-    },
+    }),
     isSaving: false,
   })
   return slides
@@ -111,18 +111,7 @@ describe('NotesPanel', () => {
 
     it('should render nothing when session has no slides', () => {
       useSessionStore.setState({
-        session: {
-          id: 'test-session',
-          name: 'Empty Session',
-          slides: [],
-          notes: {},
-          transcripts: {},
-          aiConversations: [],
-          currentSlideIndex: 0,
-          isRecording: false,
-          createdAt: '2024-01-01T00:00:00.000Z',
-          updatedAt: '2024-01-01T00:00:00.000Z',
-        },
+        session: createMockSession({ slides: [] }),
       })
       
       const { container } = render(<NotesPanel />)
